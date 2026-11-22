@@ -56,10 +56,10 @@ Gungnir Community incluye todo lo que un equipo de pentesting necesita para ejec
 - **Auto-populate por CVE** - ingresá un CVE ID y Gungnir completa automáticamente el vector CVSS, score, descripción y CWE desde la API de NVD
 - **Reporte PDF de pentesting** - salida profesional con secciones ejecutiva y técnica
 - **Importación XML** - importar hallazgos desde Nessus (.nessus), Burp Suite (.xml), OpenVAS (.xml) y Nmap (-oX .xml) directamente en cualquier fase del engagement
-- **Gestión de vulnerabilidades por cliente** - seguimiento continuo de los escaneos periódicos (Nessus, OpenVAS, Nmap, ZAP, Burp) sobre un inventario único de activos, con deduplicación, cierre y reapertura automáticos, historial, EPSS y KEV de CISA gratis con actualización diaria, prioridad calculada y plazos por severidad
+- **Gestión de vulnerabilidades por cliente** - seguimiento continuo de los escaneos periódicos (Nessus, OpenVAS, Nmap, ZAP, Burp) y del análisis de código e imágenes (SARIF 2.1.0, Trivy, Nuclei) sobre un inventario único de activos, con deduplicación, cierre y reapertura automáticos, historial, EPSS y KEV de CISA gratis con actualización diaria, prioridad calculada y plazos por severidad; una vulnerabilidad puede pasar a un engagement como hallazgo
 - **Arsenal de comandos** - 2.300+ comandos de pentesting buscables (Recon, Web, Network, Active Directory, Post-Explotación, Evasión y más) - incluye OWASP ZAP, tshark, searchsploit, smbmap, wes-ng, técnicas SysNative Windows y más
 - **Templates de hallazgos** - 22 templates preconfigurados: web (SQLi, XSS, CSRF, SSRF, XXE, RCE, path traversal, etc.), **Active Directory** (Kerberoasting, AS-REP Roasting, envenenamiento LLMNR/NBT-NS), **IoT** (credenciales por defecto, firmware sin cifrar) y **Mobile** (almacenamiento inseguro, falta de certificate pinning) + biblioteca personalizada
-- **Tema dark/light por usuario** persistido en la base de datos (te sigue entre dispositivos), y la versión del producto visible en la app
+- **Tema dark/light por usuario** persistido en la base de datos (te sigue entre dispositivos), la versión del producto visible en la app y un aviso para recargar cuando se publica una versión nueva
 - **OSINT / Recon** - Shodan, VirusTotal, Censys, crt.sh, RDAP, DNS usando tus propias API keys (sin vendor lock-in)
 - **Notas** - notas personales en markdown con sistema de tags, pin y compartir entre usuarios
 - **Research Papers** - editor estructurado de investigación de vulnerabilidades (templates Black Hat / académico / técnico) con integración directa a Exploit-DB - buscá, previsualizá y guardá papers en tu biblioteca local
@@ -83,7 +83,7 @@ Gungnir Community incluye todo lo que un equipo de pentesting necesita para ejec
 | Reporte PDF de pentesting | ✅ | ✅ |
 | Importación XML (Nessus, Burp, OpenVAS, Nmap) | ✅ | ✅ |
 | Arsenal de comandos (2.300+ comandos, incl. OWASP ZAP) | ✅ | ✅ |
-| Templates de hallazgos (15 built-in + personalizados) | ✅ | ✅ |
+| Templates de hallazgos (22 built-in incl. AD / IoT / Mobile + personalizados) | ✅ | ✅ |
 | Notas con compartir | ✅ | ✅ |
 | Export CSV de hallazgos | ✅ | ✅ |
 | Markdown en hallazgos (descripción / pasos / recomendación) | ✅ | ✅ |
@@ -100,7 +100,8 @@ Gungnir Community incluye todo lo que un equipo de pentesting necesita para ejec
 | Cobertura de metodología (checklist WSTG v4.2 + PTES, % de cobertura) | ✅ | ✅ |
 | Export de capa MITRE ATT&CK Navigator (interoperable con Gjallarhorn) | ✅ | ✅ |
 | Inventario de activos por cliente (inventario único, revisión de duplicados, vencimientos) | ✅ | ✅ |
-| Gestión de vulnerabilidades: importación manual (Nessus, OpenVAS, Nmap, ZAP, Burp), deduplicación, cierre y reapertura, historial | ✅ | ✅ |
+| Gestión de vulnerabilidades: importación manual (Nessus, OpenVAS, Nmap, ZAP, Burp, SARIF 2.1.0, Trivy, Nuclei), deduplicación, cierre y reapertura, historial | ✅ | ✅ |
+| Pase de una vulnerabilidad a un engagement (desde la ficha o en lote, sin duplicar) | ✅ | ✅ |
 | EPSS y KEV de CISA (diario), prioridad calculada, plazos por severidad y métricas | ✅ | ✅ |
 | Conectores programados de vulnerabilidades (Wazuh, OpenVAS) y API de importación para CI/CD | ❌ | ✅ |
 | Anotaciones sobre evidencia (markup de capturas) | ✅ | ✅ |
@@ -198,7 +199,7 @@ Gungnir Community incluye todo lo que un equipo de pentesting necesita para ejec
 - **Táctica + técnica MITRE** - mapeadas a nivel de hallazgo
 - **Campos de riesgo de negocio y explotabilidad**
 - **Auto-populate por CVE** - ingresá un CVE ID, Gungnir consulta la API de NVD y completa automáticamente el vector CVSS, score, descripción y CWE
-- **Templates de hallazgos** - 15 templates preconfigurados + biblioteca personalizada
+- **Templates de hallazgos** - 22 templates preconfigurados + biblioteca personalizada
 
 ### Reportes
 - **Generación de PDF** - reporte de pentesting con secciones ejecutiva y técnica
@@ -230,9 +231,10 @@ Importar hallazgos desde archivos de salida de scanners directamente en cualquie
 ### Gestión de vulnerabilidades
 Seguimiento continuo por cliente, separado de los engagements: un engagement tiene principio y fin, y los escaneos periódicos muestran el estado de la infraestructura del cliente a lo largo del tiempo.
 - **Inventario único de activos por cliente** - cada vulnerabilidad cuelga de un activo. Los escaneos suman los equipos que encuentran; la IP sola nunca une dos activos, queda para que la revise una persona
-- **Importación manual** de archivos de Nessus, OpenVAS, Nmap, ZAP y Burp. Reimportar el mismo escaneo no duplica nada: el mismo CVE (o la misma regla del escáner) en el mismo activo y puerto es una sola vulnerabilidad, aunque la informen dos herramientas
+- **Importación manual** de archivos de Nessus, OpenVAS, Nmap, ZAP y Burp, y del análisis de código e imágenes en SARIF 2.1.0, Trivy JSON y Nuclei JSONL. Lo de código e imágenes cuelga del repositorio (`repo:servidor/org/app`) o de la imagen sin etiqueta (`imagen:registro/app`), como activos de software. Reimportar el mismo escaneo no duplica nada: el mismo CVE (o la misma regla del escáner) en el mismo activo y puerto es una sola vulnerabilidad, aunque la informen dos herramientas
 - **Cierre y reapertura** - una vulnerabilidad se cierra sola solo cuando un escaneo de la misma herramienta cubrió su activo y no la volvió a encontrar; si vuelve, se reabre. Riesgo aceptado y falso positivo son decisiones de una persona y ninguna importación las cambia
 - **Historial** de cada cambio y de cada importación, con lo nuevo, lo cerrado, lo reabierto y lo que siguió igual, y una pestaña de vulnerabilidades en cada activo
+- **Pase a engagement** - desde la ficha o en lote desde el listado, una vulnerabilidad pasa a ser un hallazgo de un engagement del mismo cliente, sin duplicarse y con historial en los dos lados. Un retest aprobado aparece en la ficha con un atajo para cerrar la vulnerabilidad a mano; no la cierra solo
 - **Prioridad y plazos** - EPSS (FIRST) y el catálogo KEV (CISA) se bajan una vez por día, gratis. La prioridad combina severidad, EPSS y KEV; plazos por severidad (7/30/90/120 días por defecto, propios de cada cliente si hace falta), con 15 días como máximo para lo que está en KEV. Métricas: vencidas, por vencer, en KEV, MTTR, antigüedad y tendencia de 12 semanas
 - En instalaciones sin salida a internet, `VULN_FUENTES_EXTERNAS=0`: todo sigue funcionando con lo que ya está guardado
 - Los conectores programados (Wazuh, OpenVAS) y la API de importación para CI/CD son de Gungnir Pro. El esquema de la base es el mismo, así que al pasar a Pro se conserva toda la historia
@@ -253,7 +255,7 @@ La seguridad es una característica de primer nivel - la misma base de hardening
 - **TOTP 2FA** - RFC 6238, setup via código QR, deshabilitable con confirmación
 - **Lockout de cuenta** - 5 intentos fallidos → bloqueo de 15 minutos, **persistido en la base de datos** (sobrevive reinicios)
 - **bcrypt** para el hashing de contraseñas (salt por usuario)
-- **Headers de seguridad** (Helmet) + **rate limiting HTTP** (300 req/15 min; endpoints de auth con límite aparte)
+- **Headers de seguridad** (Helmet) + **rate limiting HTTP** sobre la API (1000 req/15 min, los archivos del panel no cuentan); el ingreso tiene su propio límite de 30 intentos cada 15 minutos por dirección, además del bloqueo por cuenta
 - **Control de acceso por rol** - `admin` / `auditor` / `pentester` con guards de rutas granulares
 - **Audit log** - todas las acciones de creación/modificación/eliminación/importación registradas con usuario, IP y timestamp
 - **SQL 100% parametrizado** - sin queries armadas por concatenación, sin vectores de inyección (OWASP Top 10 2021)
@@ -374,23 +376,22 @@ gungnir-community/
 
 ## Roadmap
 
-### v1.1 (actual)
+### v1.1
 - [x] Arsenal ampliado a 2.300+ comandos (tshark, searchsploit, smbmap, wes-ng, PS SysNative, OWASP ZAP y más)
 - [x] **Exportar/Importar engagements (ZIP)** - intercambio portable entre instancias
 - [x] **Repositorio de engagements community** - compartí y descargá templates vía `community-engagements/`
 - [x] Edición inline del título del engagement
 - [x] Auto-estado de engagement - cuando todas las fases se completan, el estado se actualiza automáticamente
 
-### v1.2 (próxima)
-- [ ] Soporte markdown en campos de descripción de hallazgos
+### v1.2 - v1.5 (entregadas)
+- [x] Markdown en hallazgos, export CSV, tema por usuario y templates nuevos de AD / IoT / Mobile (v1.2)
+- [x] Remediación y reprueba (retest), registro de tiempo, cobertura WSTG v4.2 + PTES, export de capa ATT&CK Navigator, anotaciones sobre evidencia y avisos de hallazgos (v1.3)
+- [x] Gestión de vulnerabilidades por cliente con EPSS, KEV, prioridad y plazos (v1.4)
+- [x] Importación SARIF 2.1.0, Trivy y Nuclei, y pase de una vulnerabilidad a un engagement (v1.5)
+
+### Próximo
 - [ ] Promoción automática de hallazgos desde Nmap (reglas de riesgo por puerto)
 - [ ] Más templates de engagements community (web app, AD, IoT, mobile)
-
-### v2.0
-- [ ] Colaboración en tiempo real (WebSockets)
-- [ ] Portal de cliente - los clientes ven el estado del engagement y descargan reportes
-- [ ] Mapa visual MITRE ATT&CK Navigator con heatmap
-- [ ] Seguimiento de remediación - ciclo de vida de hallazgos post-entrega
 - [ ] Templates de reportes Word/Docx
 
 ---

@@ -56,10 +56,10 @@ Gungnir Community includes everything a pentest team needs to run professional e
 - **CVE auto-populate** - enter a CVE ID and Gungnir auto-fills CVSS vector, score, description and CWE from the NVD API
 - **PDF pentest report** - professional output with executive and technical sections
 - **XML import** - import findings from Nessus (.nessus), Burp Suite (.xml), OpenVAS (.xml) and Nmap (-oX .xml) directly into any engagement phase
-- **Vulnerability management per client** - continuous tracking of periodic scans (Nessus, OpenVAS, Nmap, ZAP, Burp) on a single asset inventory, with deduplication, automatic close and reopen, history, free EPSS and CISA KEV updated daily, calculated priority and due dates by severity
+- **Vulnerability management per client** - continuous tracking of periodic scans (Nessus, OpenVAS, Nmap, ZAP, Burp) and of code and image analysis (SARIF 2.1.0, Trivy, Nuclei) on a single asset inventory, with deduplication, automatic close and reopen, history, free EPSS and CISA KEV updated daily, calculated priority and due dates by severity; a vulnerability can be taken to an engagement as a finding
 - **Command arsenal** - 2,300+ searchable pentest commands (Recon, Web, Network, Active Directory, Post-Exploitation, Evasion and more) - including OWASP ZAP, tshark, searchsploit, smbmap, wes-ng, Windows SysNative techniques and more
 - **Finding templates** - 22 built-in templates including web (SQLi, XSS, CSRF, SSRF, XXE, RCE, path traversal, etc.), **Active Directory** (Kerberoasting, AS-REP Roasting, LLMNR/NBT-NS poisoning), **IoT** (default credentials, unencrypted firmware) and **Mobile** (insecure data storage, missing certificate pinning) + custom library
-- **Per-user dark/light theme** persisted in the database (follows you across devices), and the product version visible in the app
+- **Per-user dark/light theme** persisted in the database (follows you across devices), the product version visible in the app, and a notice to reload when a new version is published
 - **OSINT / Recon** - Shodan, VirusTotal, Censys, crt.sh, RDAP, DNS using your own API keys (no vendor lock-in)
 - **Notes** - personal markdown notes with tag system, pin support and note sharing between users
 - **Research Papers** - structured vulnerability research editor (Black Hat / academic / technical templates) with direct Exploit-DB integration - search, preview and save papers to your local library
@@ -83,7 +83,8 @@ Gungnir Community includes everything a pentest team needs to run professional e
 | PDF pentest report | ✅ | ✅ |
 | XML import (Nessus, Burp, OpenVAS, Nmap) | ✅ | ✅ |
 | Asset inventory per client (single inventory, duplicates review, expiries) | ✅ | ✅ |
-| Vulnerability management: manual import (Nessus, OpenVAS, Nmap, ZAP, Burp), deduplication, close and reopen, history | ✅ | ✅ |
+| Vulnerability management: manual import (Nessus, OpenVAS, Nmap, ZAP, Burp, SARIF 2.1.0, Trivy, Nuclei), deduplication, close and reopen, history | ✅ | ✅ |
+| Take a vulnerability to an engagement (from the sheet or in bulk, never duplicated) | ✅ | ✅ |
 | EPSS and CISA KEV (daily), calculated priority, due dates by severity and metrics | ✅ | ✅ |
 | Scheduled vulnerability connectors (Wazuh, OpenVAS) and import API for CI/CD | ❌ | ✅ |
 | Command arsenal (2,300+ commands, incl. OWASP ZAP) | ✅ | ✅ |
@@ -198,7 +199,7 @@ Gungnir Community includes everything a pentest team needs to run professional e
 - **MITRE tactic + technique** - mapped at the finding level
 - **Business risk + exploitability** assessment fields
 - **CVE auto-populate** - enter a CVE ID, Gungnir queries the NVD API and auto-fills CVSS vector, score, description, and CWE
-- **Finding templates** - 15 built-in templates + custom library
+- **Finding templates** - 22 built-in templates + custom library
 
 ### Reports
 - **PDF generation** - pentest report with executive and technical sections
@@ -230,9 +231,10 @@ Import findings from scanner output files directly into any engagement phase:
 ### Vulnerability Management
 Continuous tracking per client, separate from engagements: an engagement has a start and an end, while periodic scans show the state of the client's infrastructure over time.
 - **Single asset inventory per client** - every vulnerability belongs to an asset. Scans add the hosts they find; an IP alone never merges two assets, it is left for a person to review
-- **Manual import** of Nessus, OpenVAS, Nmap, ZAP and Burp files. Re-importing the same scan does not duplicate anything: the same CVE (or scanner rule) on the same asset and port is one vulnerability, even if two tools report it
+- **Manual import** of Nessus, OpenVAS, Nmap, ZAP and Burp files, and of code and image analysis in SARIF 2.1.0, Trivy JSON and Nuclei JSONL. Code and image findings hang from the repository (`repo:host/org/app`) or the image without its tag (`imagen:registry/app`) as software assets. Re-importing the same scan does not duplicate anything: the same CVE (or scanner rule) on the same asset and port is one vulnerability, even if two tools report it
 - **Close and reopen** - a vulnerability closes on its own only when a scan from the same tool covered its asset and did not find it again; if it comes back, it reopens. Accepted risk and false positive are decisions of a person and no import changes them
 - **History** of every change and every import, with what was new, closed, reopened or unchanged, and a vulnerabilities tab in each asset
+- **Take to an engagement** - from the vulnerability sheet or in bulk from the list, a vulnerability becomes a finding of an engagement of the same client, never duplicated, with history on both sides. A passed retest shows up in the sheet with a shortcut to close the vulnerability manually; it does not close it by itself
 - **Priority and due dates** - EPSS (FIRST) and the KEV catalog (CISA) are downloaded once a day, free of charge. Priority combines severity, EPSS and KEV; due dates by severity (7/30/90/120 days by default, per client if needed), at most 15 days for anything in KEV. Metrics: overdue, due soon, in KEV, MTTR, age and 12-week trend
 - Set `VULN_FUENTES_EXTERNAS=0` on installations without internet access: everything works with what is already stored
 - Scheduled connectors (Wazuh, OpenVAS) and the import API for CI/CD are part of Gungnir Pro. The database schema is the same, so moving to Pro keeps the full history
@@ -253,7 +255,7 @@ Security is a first-class feature here - the same hardening baseline as the comm
 - **TOTP 2FA** - RFC 6238, setup via QR code, disable with confirmation
 - **Account lockout** - 5 failed attempts → 15-minute lockout, **persisted in the database** (survives restarts)
 - **bcrypt** password hashing (per-user salt)
-- **Security headers** (Helmet) + **HTTP rate limiting** (300 req/15 min; auth endpoints throttled separately)
+- **Security headers** (Helmet) + **HTTP rate limiting** on the API (1000 req/15 min, the panel files do not count); sign-in has its own limit of 30 attempts per 15 minutes per address, on top of the per-account lockout
 - **Role-based access control** - `admin` / `auditor` / `pentester` with fine-grained route guards
 - **Audit log** - all create/update/delete/import actions logged with user, IP, and timestamp
 - **100% parameterized SQL** - no string-built queries, no injection vectors (OWASP Top 10 2021)
@@ -374,23 +376,22 @@ gungnir-community/
 
 ## Roadmap
 
-### v1.1 (current)
+### v1.1
 - [x] Arsenal expanded to 2,300+ commands (tshark, searchsploit, smbmap, wes-ng, SysNative PS, OWASP ZAP and more)
 - [x] **Export/Import engagements (ZIP)** - portable engagement exchange across instances
 - [x] **Community Engagements repository** - share and download real engagement templates via `community-engagements/`
 - [x] Inline engagement title editing
 - [x] Engagement auto-status - when all phases complete, status updates automatically
 
-### v1.2 (next)
-- [ ] Markdown support in finding description fields
+### v1.2 - v1.5 (delivered)
+- [x] Markdown in findings, CSV export, per-user theme and new AD / IoT / Mobile finding templates (v1.2)
+- [x] Remediation / retest tracking, time tracking, WSTG v4.2 + PTES coverage, ATT&CK Navigator layer export, evidence annotations and finding alerts (v1.3)
+- [x] Vulnerability management per client with EPSS, KEV, priority and due dates (v1.4)
+- [x] SARIF 2.1.0, Trivy and Nuclei import, and taking a vulnerability to an engagement (v1.5)
+
+### Next
 - [ ] Nmap auto-promote findings (port-based risk rules)
 - [ ] More community engagement templates (web app, AD, IoT, mobile)
-
-### v2.0
-- [ ] Real-time collaboration (WebSockets)
-- [ ] Client portal - clients view engagement status and download reports
-- [ ] MITRE ATT&CK Navigator visual heatmap
-- [ ] Remediation tracking - post-delivery finding lifecycle
 - [ ] Word/Docx report templates
 
 ---
