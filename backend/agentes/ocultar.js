@@ -41,7 +41,8 @@ const SECRETOS = [
   ["cred", /(?<=:\/\/[^\s:/@]{0,100}:)[^\s@/]{1,200}(?=@)/g],
   ["cred", /(?<=\b[\w.-]{1,40}\/[\w.-]{1,60}:)[^\s@:]{1,120}(?=@[\w.[])/g],
   ["hash", /\b[0-9a-f]{32}:[0-9a-f]{32}\b/gi],
-  ["hash", /\$(?:1|2[abxy]|5|6|y|argon2id?|krb5\w{2,8})\$[\w./$*@=,+-]{6,4000}/g],
+  ["hash", /\$krb5\w{2,8}\$[^\s"']{6,20000}/g],
+  ["hash", /\$(?:1|2[abxy]|5|6|y|argon2id?)\$[\w./$*@=,+-]{6,4000}/g],
   ["cred", CON_VALOR],
   // usuario:clave detrás de -u, sin confundir una URL; usuario%clave de smbclient; /p: de xfreerdp.
   ["cred", /(?<=\s(?:-u|--user)[ =]{0,2}["']?[^\s:"'%/]{1,60}:)(?!\/\/)(?!\[OCULTO:)[^\s"']{1,200}/g],

@@ -19,6 +19,9 @@
 const ES_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX32 = (1n << 32n) - 1n;
 const HOST = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9_][a-z0-9_-]{0,62})*$/;
+// "10.0.0.x", "10.0.0-1.1-20", "10.x.x.x": direcciones mal escritas que pasarían por nombres. Con más de
+// cuatro partes sí es un nombre (10.0.0.5.nip.io).
+const DIRECCION_ROTA = /^\d{1,3}(?:-\d{1,3})?\.(?:\d{1,3}(?:-\d{1,3})?\.[^.]+(?:\.[^.]+)?|(?:x{1,3}|n)(?:\.(?:\d{1,3}|x{1,3}|n))*)$/;
 const PUERTO_DE_ESQUEMA = {
   http: 80, https: 443, ws: 80, wss: 443, ftp: 21, ftps: 990, ssh: 22, sftp: 22, telnet: 23, smb: 445, rdp: 3389, ldap: 389, ldaps: 636,
   mysql: 3306, postgres: 5432, postgresql: 5432, redis: 6379, mongodb: 27017, vnc: 5900,
@@ -61,7 +64,7 @@ function canonizarHost(crudo) {
   const n4 = ipv4ANumero(canon);
   // 255.255.255.0 y 0.0.0.255 son máscaras, no equipos.
   if (n4 !== null) return n4 >> 24n === 255n || n4 >> 24n === 0n ? null : { ip: { v: 4, n: n4 } };
-  return HOST.test(canon) ? { host: canon } : null;
+  return HOST.test(canon) && !DIRECCION_ROTA.test(canon) ? { host: canon } : null;
 }
 
 function rangoCidr(s) {
@@ -98,11 +101,13 @@ function leerUrl(s, conEsquema, comodin) {
   if (!c) return null;
   let ruta;
   try { ruta = decodeURIComponent(u.pathname); } catch { return null; }
-  // Tras decodificar no puede quedar nada codificado ni que suba de directorio: cada servidor lo lee distinto.
-  if (/[\\\x00-\x1f]|%[\da-f]{2}/i.test(ruta) || ruta.split("/").some((p) => p === ".." || p === ".")) return null;
+  // Tras decodificar y sacar los parámetros de segmento ("..;x=1") no puede quedar nada codificado ni que
+  // suba de directorio: cada servidor lo lee distinto.
+  const segmentos = ruta.split("/").map((p) => p.split(";")[0]);
+  if (/[\\\x00-\x1f]|%[\da-f]{2}/i.test(ruta) || segmentos.some((p) => p === ".." || p === ".")) return null;
   // "10.0.0.0/255.255.255.0" es una red con máscara, no una ruta.
   if (!conEsquema && /^\/\d{1,3}(?:\.\d{1,3}){3}$/.test(ruta)) return null;
-  ruta = ruta.split("/").map((p) => p.split(";")[0]).join("/").replace(/\/{2,}/g, "/");
+  ruta = segmentos.join("/").replace(/\/{2,}/g, "/");
   if (comodin) ruta = ruta.replace(/\/\*{1,2}$/, "");
   if (comodin && ruta.includes("*")) return null;
   const esquema = conEsquema ? u.protocol.slice(0, -1) : null;
@@ -113,7 +118,8 @@ function leerUrl(s, conEsquema, comodin) {
 /** Interpreta un objetivo o un ítem del alcance. Null si no se entiende. */
 function leer(crudo, { comodin = false } = {}) {
   const s = String(crudo ?? "").trim();
-  if (!s || s.length > 2000 || /[\\\x00-\x1f]/.test(s)) return null;
+  // Una ruta suelta ("/admin") no dice de qué sitio es.
+  if (!s || s.length > 2000 || s.startsWith("/") || /[\\\x00-\x1f]/.test(s)) return null;
   if (ES_URL.test(s)) return leerUrl(s, true, comodin);
   const rango = rangoCidr(s) || rangoConGuion(s);
   if (rango) return rango.ilegible ? null : rango;

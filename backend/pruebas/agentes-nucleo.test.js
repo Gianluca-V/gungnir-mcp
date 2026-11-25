@@ -86,16 +86,24 @@ describe("alcance", () => {
     assert.equal(dentro("10.0.0.5", en("application", "10.0.0.5"), fuera("cidr", "10.0.0.0/24")), false);
   });
   describe("una exclusión mal escrita hace que nada quede dentro", () => {
-    for (const x of ["10.0.0.5,6,7", "10.0.0.5 a 10.0.0.20", "10.0.0.5 al 10.0.0.20", "10.0.0.5 - 10.0.0.20", "10.0.0.0/255.255.255.0", "10.0.0.0 255.255.255.0", "10.0.0.0 0.0.0.255", "10.0.0.5:80,443", "10.0.0.5 (DC)", "10.0.0.*"])
+    for (const x of ["10.0.0.5,6,7", "10.0.0.5 a 10.0.0.20", "10.0.0.5 al 10.0.0.20", "10.0.0.5 - 10.0.0.20", "10.0.0.0/255.255.255.0", "10.0.0.0 255.255.255.0", "10.0.0.0 0.0.0.255", "10.0.0.5:80,443", "10.0.0.5 (DC)", "10.0.0.*",
+      "/admin", "/logout?x=1", "10.0.0.x", "10.x.x.x", "10.0.xx.xx", "10.0.0-1.1-20", "10.0.0.5–20", "10.0.0.5-20:80"])
       for (const tipo of ["ip", "cidr", "domain", "url"])
         test(`${tipo} ${x}`, () => assert.equal(dentro("10.0.0.10", RED, fuera(tipo, x)), false));
+  });
+  test("una ruta que sube con parámetro de segmento no se toma por válida", () => {
+    assert.equal(dentro("https://portal.acme.com/app/..;/admin", en("url", "https://portal.acme.com/app")), false);
+  });
+  test("una dirección mal escrita tampoco vale como dominio dentro de alcance", () => {
+    for (const x of ["10.0.0.x", "10.0.0-1.1-20", "/admin"]) assert.equal(dentro(x, en("domain", x)), false, x);
+    for (const x of ["10.0.0.5.nip.io", "163.com", "4.3.2.1.in-addr.arpa", "1.lab.acme.com"]) assert.equal(dentro(x, en("domain", x)), true, x);
   });
   test("un nombre sin puntos solo vale si va solo", () => {
     assert.equal(dentro("DC01", en("domain", "DC01")), true);
     assert.equal(dentro("DC01", en("domain", "DC01"), fuera("domain", "DC02")), true);
   });
   describe("una ruta excluida no se esquiva", () => {
-    for (const r of ["/admin", "//admin/x", "/admin/", "/%61dmin", "/%2561dmin", "/ADMIN/x", "/admin;x=1/y", "/x/../admin", "/./admin", "/admin?x", "/admin#x"])
+    for (const r of ["/admin", "//admin/x", "/admin/", "/%61dmin", "/%2561dmin", "/ADMIN/x", "/admin;x=1/y", "/x/..;/admin", "/x/..;a=1/admin", "/x/..%3b/admin", "/.;/admin", "/x/../admin", "/./admin", "/admin?x", "/admin#x"])
       test(r, () => assert.equal(dentro(`https://app.acme.com${r}`, SITIO, fuera("url", "https://app.acme.com/admin")), false));
     test("con comodín al final", () => {
       assert.equal(dentro("https://app.acme.com/admin/x", SITIO, fuera("url", "https://app.acme.com/admin/*")), false);
@@ -154,6 +162,9 @@ describe("ocultamiento", () => {
     ["curl -u admin:Hola1234 http://x", "Hola1234"], ["mysql -uroot -pHola1234", "Hola1234"], ["smbclient -U ana%Hola1234 //h/c", "Hola1234"], ["xfreerdp /u:a /p:Hola1234 /v:h", "Hola1234"],
     ["nxc smb h -u a -H 31d6cfe0d16ae931b73c59d7e0c089c0", "31d6cfe0"], ["evil-winrm -i h -H 31d6cfe0d16ae931b73c59d7e0c089c0", "31d6cfe0"], ["psexec.py -hashes :31d6cfe0d16ae931b73c59d7e0c089c0 a@h", "31d6cfe0"],
     ["ana::CORP:1122334455667788:0123456789abcdef0123456789abcdef:0101000000000000aabbccdd", "0123456789abcdef0123"],
+    ["$krb5asrep$23$ana@CORP.LOCAL:0123456789abcdef0123456789abcdef$a1b2c3d4e5f60718", "a1b2c3d4e5f6"],
+    ["$krb5tgs$23$*svc$CORP$http/web.corp.local~8080*$0123456789abcdef0123456789abcdef$a1b2c3d4e5f60718", "a1b2c3d4e5f6"],
+    ["$krb5tgs$18$svc$CORP$*MSSQLSvc/db:1433*$0123456789abcdef01234567$a1b2c3d4e5f60718", "a1b2c3d4e5f6"],
     ["Cookie: PHPSESSID=abc123def456; x=1", "abc123def456"], ["Set-Cookie: sid=zzz999; Path=/", "zzz999"], ["JSESSIONID=AB12CD34", "AB12CD34"], ["nxc smb h -u a -p 12345678", "12345678"],
     ["Authorization: token abcd1234", "abcd1234"], ["Authorization: abcd1234abcd", "abcd1234abcd"], ["redis://:Hola1234@h", "Hola1234"],
     ["password is Hola1234", "Hola1234"], ["la contraseña es Hola1234", "Hola1234"], [`sk_live_${"a1B2c3".repeat(4)}`, "a1B2c3"],
