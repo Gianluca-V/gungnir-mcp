@@ -92,7 +92,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     if (r.affectedRows) return null;
     const p = await qRow("SELECT huella, lista, codigo, respuesta FROM agente_idempotencia WHERE key_id=? AND clave=?", [keyId, clave]);
     if (p && p.huella !== huella) throw new ErrorHttp(422, "Esa Idempotency-Key ya se usó con otro contenido.");
-    if (!p || !p.lista) throw new ErrorHttp(409, "El mismo pedido todavía se está procesando. Reintentá en unos segundos.");
+    if (!p || !p.lista) throw new ErrorHttp(409, "El mismo pedido todavía se está procesando. Reintentá en unos segundos.", { en_curso: true });
     return { codigo: p.codigo, cuerpo: JSON.parse(p.respuesta) };
   }
 
