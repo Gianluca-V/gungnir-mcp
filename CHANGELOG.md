@@ -3,6 +3,21 @@
 All notable changes to Gungnir Community are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/); versioning follows [SemVer](https://semver.org/).
 
+## [Sin publicar] - fork con agentes por MCP
+
+### Agregado
+- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 18 herramientas y prompts por fase.
+- API para agentes en `/api/agente/v1`, con keys propias, límite de pedidos por key, reintentos seguros y auditoría. Las API keys anteriores no cambian.
+- Niveles de autonomía por key y por engagement. Los engagements existentes quedan sin acceso.
+- Propuestas de hallazgos que aprueba una persona, y registro de acciones fuera de alcance.
+- Ocultamiento por patrones de datos del cliente y secretos en lo que recibe un agente.
+- Pantalla Integraciones > Agentes y aviso en la cabecera.
+- Contenedor opcional para correr el agente aislado, en `agente/`.
+
+### Cambiado
+- El límite general de pedidos ya no cuenta los de `/api/agente/v1`, que tienen el suyo.
+- La base suma tablas `agente_*` y dos columnas en `operation_logs`.
+
 ## [1.5.2] - 2026-11-19
 
 ### Fixed

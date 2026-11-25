@@ -26,6 +26,16 @@ Gungnir Community es una plataforma de gestión de pentesting libre y open sourc
 
 ---
 
+## 🤖 Agentes por MCP (este fork)
+
+> Este repositorio es un fork no oficial de [Gungnir Community](https://github.com/allsafe-ar/gungnir-community). No está respaldado por AllSafe Security Solutions.
+
+Suma un servidor MCP para que agentes como Claude Code u opencode trabajen dentro de los engagements que habilites: consultan el alcance y la metodología, registran lo que hacen y cargan hallazgos. Vos elegís el nivel de autonomía (Lectura, Propuesta, Escritura o Total) por key y por engagement, aprobás las propuestas y ves las acciones fuera de alcance en **Integraciones > Agentes**.
+
+Instalación, niveles y límites: [`mcp/README.md`](mcp/README.md).
+
+---
+
 ## 🤝 Engagements de la Comunidad
 
 Gungnir tiene un intercambio de engagements integrado: **exportá cualquier engagement como ZIP e importalo en cualquier instancia con un solo clic** - hallazgos, fases, operation logs, scope y archivos de evidencia incluidos.

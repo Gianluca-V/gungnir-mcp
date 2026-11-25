@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "mcp": {
+    "gungnir": {
+      "type": "local",
+      "command": ["node", "/opt/gungnir-mcp/dist/index.js"],
+      "enabled": true
+    }
+  }
+}

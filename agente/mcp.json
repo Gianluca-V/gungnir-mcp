@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "gungnir": {
+      "command": "node",
+      "args": ["/opt/gungnir-mcp/dist/index.js"],
+      "env": {
+        "GUNGNIR_URL": "${GUNGNIR_URL}",
+        "GUNGNIR_API_KEY": "${GUNGNIR_API_KEY}",
+        "GUNGNIR_ENGAGEMENT": "${GUNGNIR_ENGAGEMENT:-}",
+        "GUNGNIR_PERMITIR_HTTP": "${GUNGNIR_PERMITIR_HTTP:-}",
+        "GUNGNIR_CARPETA": "/trabajo"
+      }
+    }
+  }
+}

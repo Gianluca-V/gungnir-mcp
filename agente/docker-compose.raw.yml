@@ -1,0 +1,11 @@
+# Agrega paquetes crudos, para escaneos SYN y detección de sistema operativo:
+#   docker compose -f agente/docker-compose.yml -f agente/docker-compose.raw.yml run --rm agente
+#
+# El agente corre como root del contenedor, con NET_RAW como única capacidad. Sin este archivo,
+# nmap usa conexiones completas (-sT).
+services:
+  agente:
+    user: root
+    environment:
+      HOME: /home/node
+    cap_add: [NET_RAW]

@@ -1,0 +1,40 @@
+# Uso, desde la raíz del repo:
+#   export GUNGNIR_API_KEY=gnga_...
+#   docker compose -f agente/docker-compose.yml run --rm agente
+#
+# El contenedor solo ve la carpeta de trabajo. No monta el disco del equipo ni el socket de Docker.
+services:
+  agente:
+    build:
+      context: ..
+      dockerfile: agente/Dockerfile
+    stdin_open: true
+    tty: true
+    init: true
+    environment:
+      GUNGNIR_URL: ${GUNGNIR_URL:-http://host.docker.internal:3006}
+      GUNGNIR_API_KEY: ${GUNGNIR_API_KEY:?Falta GUNGNIR_API_KEY. Se crea en el panel, en Integraciones > Agentes}
+      GUNGNIR_ENGAGEMENT: ${GUNGNIR_ENGAGEMENT:-}
+      # El tráfico hacia host.docker.internal no sale del equipo. Con una URL https no hace falta.
+      GUNGNIR_PERMITIR_HTTP: ${GUNGNIR_PERMITIR_HTTP:-1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:size=512m,mode=1777"]
+    pids_limit: 512
+    mem_limit: 4g
+    volumes:
+      - ${GUNGNIR_TRABAJO:-./trabajo}:/trabajo
+      - agente_claude:/home/node/.claude
+      - agente_config:/home/node/.config
+      - agente_local:/home/node/.local
+      - agente_cache:/home/node/.cache
+
+volumes:
+  agente_claude:
+  agente_config:
+  agente_local:
+  agente_cache:
