@@ -23,6 +23,13 @@ import {
   useResumenAgentes,
   type Propuesta,
 } from './comun'
+import { DialogoPropuesta } from './dialogo-propuesta'
+
+interface Aprobacion {
+  p: Propuesta
+  /** Lo corregido. Sin esto se aprueba tal como vino. */
+  datos?: Record<string, unknown>
+}
 
 function texto(v: unknown): string {
   if (v === null || v === undefined) return ''
@@ -36,7 +43,8 @@ export function Propuestas() {
   const fecha = useFechaHora()
   const { decide } = usePermisosAgentes()
   const [elegidas, setElegidas] = useState<Set<string>>(new Set())
-  const [conflicto, setConflicto] = useState<Propuesta | null>(null)
+  const [aEditar, setAEditar] = useState<Propuesta | null>(null)
+  const [conflicto, setConflicto] = useState<Aprobacion | null>(null)
   const [aRechazar, setARechazar] = useState<Propuesta | null>(null)
   const [motivo, setMotivo] = useState('')
 
@@ -52,20 +60,21 @@ export function Propuestas() {
 
   const alTerminar = () => qc.invalidateQueries({ queryKey: ['agentes'] })
   const aprobar = useMutation({
-    mutationFn: ({ p, forzar }: { p: Propuesta; forzar: boolean }) =>
+    mutationFn: ({ p, datos, forzar }: Aprobacion & { forzar: boolean }) =>
       apiFetch(`/agentes/propuestas/${p.id}/aprobar`, {
         method: 'POST',
-        body: { forzar },
+        body: { forzar, datos },
       }),
     onSuccess: () => {
       setConflicto(null)
+      setAEditar(null)
       toast.success(t('agentes.proposals.approved'))
     },
     onError: (
       e: Error & { datos?: { conflicto?: boolean } },
-      { p, forzar }
+      { p, datos, forzar }
     ) => {
-      if (!forzar && e.datos?.conflicto) setConflicto(p)
+      if (!forzar && e.datos?.conflicto) setConflicto({ p, datos })
       else toast.error(e.message)
     },
     onSettled: alTerminar,
@@ -240,6 +249,14 @@ export function Propuestas() {
                           {t('agentes.proposals.reject')}
                         </Button>
                         <Button
+                          variant='outline'
+                          size='sm'
+                          disabled={ocupado}
+                          onClick={() => setAEditar(p)}
+                        >
+                          {t('agentes.edit.open')}
+                        </Button>
+                        <Button
                           size='sm'
                           disabled={ocupado}
                           onClick={() => aprobar.mutate({ p, forzar: false })}
@@ -284,6 +301,17 @@ export function Propuestas() {
         </ul>
       </Estado>
 
+      {aEditar && (
+        <DialogoPropuesta
+          key={aEditar.id}
+          propuesta={aEditar}
+          ocupado={aprobar.isPending}
+          cerrar={() => setAEditar(null)}
+          aprobar={(datos) =>
+            aprobar.mutate({ p: aEditar, datos, forzar: false })
+          }
+        />
+      )}
       <ConfirmDialog
         open={!!conflicto}
         onOpenChange={(v) => !v && setConflicto(null)}
@@ -293,7 +321,7 @@ export function Propuestas() {
         destructive
         isLoading={aprobar.isPending}
         handleConfirm={() =>
-          conflicto && aprobar.mutate({ p: conflicto, forzar: true })
+          conflicto && aprobar.mutate({ ...conflicto, forzar: true })
         }
       />
       <ConfirmDialog

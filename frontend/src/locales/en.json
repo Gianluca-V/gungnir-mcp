@@ -2220,12 +2220,91 @@
         "otra": "Unknown request"
       }
     },
+    "edit": {
+      "open": "Edit",
+      "title": "Edit and approve",
+      "desc_new": "What the agent proposed. Correct whatever is needed: approving saves it as a finding.",
+      "desc_change": "What the agent proposed next to the current value. Remove the fields you do not want to apply.",
+      "changed": "The finding changed after the proposal. Compare before approving.",
+      "include": "Apply {{field}}",
+      "edited": "Edited",
+      "removed": "Not applied",
+      "restore": "Restore proposal",
+      "current": "Current",
+      "unset": "No value",
+      "one_per_line": "One per line",
+      "error_required": "It cannot be empty.",
+      "error_score": "A number from 0 to 10.",
+      "error_list": "Up to 50 lines of 1000 characters.",
+      "count_one": "{{count}} edited field",
+      "count_other": "{{count}} edited fields",
+      "no_changes": "No changes to the proposal",
+      "approve_edited": "Approve with changes"
+    },
+    "field": {
+      "title": "Title",
+      "affected_asset": "Affected asset",
+      "severity": "Severity",
+      "status": "Status",
+      "description": "Description",
+      "steps_to_reproduce": "Steps to reproduce",
+      "recommendation": "Recommendation",
+      "executive_summary": "Executive summary",
+      "cvss_score_31": "CVSS 3.1 score",
+      "cvss_vector_31": "CVSS 3.1 vector",
+      "cvss_score_40": "CVSS 4.0 score",
+      "cvss_vector_40": "CVSS 4.0 vector",
+      "cwe_id": "CWE",
+      "cwe_name": "CWE name",
+      "owasp_category": "OWASP category",
+      "owasp_year": "OWASP year",
+      "mitre_tactic": "MITRE tactic",
+      "mitre_technique_id": "MITRE technique id",
+      "mitre_technique_name": "MITRE technique",
+      "business_risk": "Business risk",
+      "exploitability": "Exploitability",
+      "phase_type": "Phase",
+      "references_list": "References"
+    },
+    "option": {
+      "severity": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "info": "Info"
+      },
+      "status": {
+        "open": "Open",
+        "in_remediation": "In remediation",
+        "fixed": "Fixed"
+      },
+      "business_risk": {
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "exploitability": {
+        "proven": "Proven",
+        "functional": "Functional",
+        "poc": "Proof of concept",
+        "theoretical": "Theoretical"
+      },
+      "phase_type": {
+        "planning": "Planning",
+        "recon": "Recon",
+        "scanning": "Scanning",
+        "exploitation": "Exploitation",
+        "post_exploitation": "Post-exploitation",
+        "reporting": "Reporting"
+      }
+    },
     "pause": {
       "all": "Pause agents",
       "all_title": "Pause every agent?",
       "all_desc": "No key will be able to read or write in Gungnir until an admin or auditor resumes. It does not stop what an agent is already running in its terminal.",
       "active_title": "Agents paused",
-      "active_desc": "No key can read or write. Paused by {{user}} on {{date}}. Anything already running in a terminal continues until you stop it there.",
+      "active_desc": "No key can read or write. Paused by {{user}} ({{date}}). Anything already running in a terminal continues until you stop it there.",
       "who_resumes": "An admin or auditor can resume.",
       "resume": "Resume",
       "one": "Pause",

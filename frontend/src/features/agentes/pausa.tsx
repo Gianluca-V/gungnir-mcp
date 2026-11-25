@@ -130,7 +130,7 @@ export function PausaEngagement({
         </Button>
       )}
       {desde && (
-        <span className='text-xs font-medium text-amber-800 dark:text-amber-400'>
+        <span className='max-w-36 text-xs font-medium whitespace-normal text-amber-800 dark:text-amber-400'>
           {t('agentes.pause.since', {
             date: fecha(desde),
             interpolation: { escapeValue: false },

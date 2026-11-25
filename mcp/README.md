@@ -93,6 +93,8 @@ Vale el más restrictivo entre la key, el engagement, el rol de quien creó la k
 
 **Pausa.** Desde Integraciones > Agentes se frena a todos los agentes o a un engagement. Corta lectura y escritura (error 423) sin tocar niveles ni keys; confirmada, no se guarda ninguna escritura más. Pausa un admin, auditor o pentester; reanuda un admin o auditor. No detiene lo que un agente ya corra en su terminal.
 
+**Propuestas.** Se aprueban, se rechazan o se editan antes de aprobar. En un cambio se compara con el valor actual y se pueden sacar campos. Lo editado pasa las mismas reglas y el control de alcance; lo propuesto se conserva, y el agente ve qué campos se editaron (`campos_editados`).
+
 **Actividad.** En la pestaña Keys, el botón de historial muestra lo que escribió cada key y lo que se le rechazó, con filtros por rechazos y fuera de alcance. No anota consultas, agrupa los rechazos repetidos y se conserva 90 días. La ven el dueño de la key y los administradores.
 
 Ningún nivel permite cambiar el alcance, aprobar propuestas, ni administrar usuarios, configuración o keys.

@@ -201,12 +201,40 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     res.json(filas.map((f) => ({ ...f, datos: comoObjeto(f.datos) })));
   }));
 
-  async function aprobar(req, id, forzar) {
+  app.get("/api/agentes/propuestas/:id", auth(), ruta(async (req, res) => {
+    const p = await qRow(
+      `SELECT p.*, e.title AS engagement_title FROM agente_propuestas p JOIN engagements e ON e.id=p.engagement_id WHERE p.id=?`, [req.params.id]);
+    if (!p) throw new ErrorHttp(404, "La propuesta no existe.");
+    const datos = comoObjeto(p.datos);
+    let actual = null, cambio = false;
+    if (p.accion === "actualizar") {
+      const campos = Object.keys(datos).filter((k) => H.CAMPOS.includes(k));
+      const f = await qRow(`SELECT updated_at >= ? AS cambio, title AS _titulo${campos.map((k) => `, ${k}`).join("")} FROM findings WHERE id=? AND engagement_id=?`,
+        [p.creada_en, p.finding_id, p.engagement_id]);
+      if (f) {
+        cambio = Boolean(f.cambio);
+        actual = Object.fromEntries(campos.map((k) => [k, k === "references_list" && f[k] ? comoObjeto(f[k]) : f[k]]));
+        p.hallazgo_actual = f._titulo;
+      }
+    }
+    res.json({ ...p, datos, actual, cambio });
+  }));
+
+  /** Los campos en que lo aprobado difiere de lo propuesto, incluidos los que se sacaron. */
+  function camposEditados(propuesto, aprobado) {
+    const igual = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    return [...new Set([...Object.keys(propuesto), ...Object.keys(aprobado)])]
+      .filter((k) => k in propuesto !== k in aprobado || !igual(propuesto[k], aprobado[k]));
+  }
+
+  async function aprobar(req, id, forzar, editados) {
     const r = await transaccion(async (tx) => {
       const p = await tx.qRow("SELECT * FROM agente_propuestas WHERE id=? FOR UPDATE", [id]);
       if (!p) throw new ErrorHttp(404, "La propuesta no existe.");
       if (p.estado !== "pendiente") throw new ErrorHttp(409, `La propuesta ya fue ${p.estado}.`);
-      const datos = comoObjeto(p.datos);
+      const propuesto = comoObjeto(p.datos);
+      const datos = editados === undefined ? propuesto : H.validar(editados, { alta: p.accion === "crear" });
+      const campos = camposEditados(propuesto, datos);
       if (datos.affected_asset) {
         const a = evaluar(datos.affected_asset, await tx.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [p.engagement_id]));
         if (!a.dentro) throw new ErrorHttp(409, `El activo ya no está en el alcance: ${a.motivo}`);
@@ -223,10 +251,12 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
         if (f.cambio && !forzar) throw new ErrorHttp(409, "El hallazgo cambió después de la propuesta.", { conflicto: true });
         await H.modificar(tx, p.engagement_id, p.finding_id, datos);
       }
-      await tx.qRun("UPDATE agente_propuestas SET estado='aprobada', finding_id=?, decidida_por=?, decidida_en=NOW() WHERE id=?", [findingId, req.user.id, id]);
-      return { p, findingId };
+      await tx.qRun("UPDATE agente_propuestas SET estado='aprobada', finding_id=?, datos_aprobados=?, campos_editados=?, decidida_por=?, decidida_en=NOW() WHERE id=?",
+        [findingId, campos.length ? JSON.stringify(datos) : null, campos.length ? JSON.stringify(campos) : null, req.user.id, id]);
+      return { p, findingId, campos };
     });
-    await anotar(req, "agente_propuesta_aprobar", "findings", r.findingId, `Propuesta de la key "${r.p.key_nombre}"`);
+    await anotar(req, "agente_propuesta_aprobar", "findings", r.findingId,
+      `Propuesta de la key "${r.p.key_nombre}"${r.campos.length ? `. Editada: ${r.campos.join(", ")}` : ""}`);
     if (r.p.accion === "crear") notificar(r.findingId, r.p.engagement_id);
     return r.findingId;
   }
@@ -247,7 +277,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
   }));
 
   app.post("/api/agentes/propuestas/:id/aprobar", auth(ESCRIBEN), ruta(async (req, res) => {
-    res.json({ ok: true, finding_id: await aprobar(req, req.params.id, req.body?.forzar === true) });
+    res.json({ ok: true, finding_id: await aprobar(req, req.params.id, req.body?.forzar === true, req.body?.datos) });
   }));
 
   app.post("/api/agentes/propuestas/:id/rechazar", auth(ESCRIBEN), ruta(async (req, res) => {

@@ -52,6 +52,13 @@ export interface Propuesta {
   creada_en: string
 }
 
+export interface DetallePropuesta extends Propuesta {
+  /** En un cambio, el valor actual de los campos propuestos. */
+  actual: Record<string, unknown> | null
+  /** El hallazgo se modificó después de la propuesta. */
+  cambio: boolean
+}
+
 export interface Violacion {
   id: string
   engagement_title: string

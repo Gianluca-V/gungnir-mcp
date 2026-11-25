@@ -77,6 +77,10 @@ async function crearTablas({ qRun }) {
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 
+  // Lo que la persona corrigió al aprobar. `datos` sigue siendo lo que propuso el agente.
+  await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN datos_aprobados JSON NULL");
+  await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN campos_editados JSON NULL");
+
   await qRun(`CREATE TABLE IF NOT EXISTS agente_violaciones (
     id VARCHAR(36) PRIMARY KEY,
     engagement_id VARCHAR(36) NOT NULL,

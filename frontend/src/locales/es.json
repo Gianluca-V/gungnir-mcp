@@ -2220,12 +2220,91 @@
         "otra": "Pedido desconocido"
       }
     },
+    "edit": {
+      "open": "Editar",
+      "title": "Editar y aprobar",
+      "desc_new": "Lo que propuso el agente. Corregí lo que haga falta: se guarda como hallazgo al aprobar.",
+      "desc_change": "Lo que propuso el agente junto al valor actual. Sacá los campos que no quieras aplicar.",
+      "changed": "El hallazgo se modificó después de la propuesta. Compará antes de aprobar.",
+      "include": "Aplicar {{field}}",
+      "edited": "Editado",
+      "removed": "No se aplica",
+      "restore": "Volver a lo propuesto",
+      "current": "Actual",
+      "unset": "Sin valor",
+      "one_per_line": "Una por línea",
+      "error_required": "No puede quedar vacío.",
+      "error_score": "Un número entre 0 y 10.",
+      "error_list": "Hasta 50 líneas de 1000 caracteres.",
+      "count_one": "{{count}} campo editado",
+      "count_other": "{{count}} campos editados",
+      "no_changes": "Sin cambios sobre lo propuesto",
+      "approve_edited": "Aprobar con cambios"
+    },
+    "field": {
+      "title": "Título",
+      "affected_asset": "Activo afectado",
+      "severity": "Severidad",
+      "status": "Estado",
+      "description": "Descripción",
+      "steps_to_reproduce": "Pasos para reproducir",
+      "recommendation": "Recomendación",
+      "executive_summary": "Resumen ejecutivo",
+      "cvss_score_31": "Puntaje CVSS 3.1",
+      "cvss_vector_31": "Vector CVSS 3.1",
+      "cvss_score_40": "Puntaje CVSS 4.0",
+      "cvss_vector_40": "Vector CVSS 4.0",
+      "cwe_id": "CWE",
+      "cwe_name": "Nombre del CWE",
+      "owasp_category": "Categoría OWASP",
+      "owasp_year": "Año de OWASP",
+      "mitre_tactic": "Táctica MITRE",
+      "mitre_technique_id": "Id de técnica MITRE",
+      "mitre_technique_name": "Técnica MITRE",
+      "business_risk": "Riesgo de negocio",
+      "exploitability": "Explotabilidad",
+      "phase_type": "Fase",
+      "references_list": "Referencias"
+    },
+    "option": {
+      "severity": {
+        "critical": "Crítica",
+        "high": "Alta",
+        "medium": "Media",
+        "low": "Baja",
+        "info": "Informativa"
+      },
+      "status": {
+        "open": "Abierto",
+        "in_remediation": "En remediación",
+        "fixed": "Corregido"
+      },
+      "business_risk": {
+        "high": "Alto",
+        "medium": "Medio",
+        "low": "Bajo"
+      },
+      "exploitability": {
+        "proven": "Probada",
+        "functional": "Funcional",
+        "poc": "Prueba de concepto",
+        "theoretical": "Teórica"
+      },
+      "phase_type": {
+        "planning": "Planificación",
+        "recon": "Reconocimiento",
+        "scanning": "Escaneo",
+        "exploitation": "Explotación",
+        "post_exploitation": "Post-explotación",
+        "reporting": "Reporte"
+      }
+    },
     "pause": {
       "all": "Pausar agentes",
       "all_title": "¿Pausar todos los agentes?",
       "all_desc": "Ninguna key va a poder leer ni escribir en Gungnir hasta que un admin o un auditor reanude. No detiene lo que un agente ya esté corriendo en su terminal.",
       "active_title": "Agentes en pausa",
-      "active_desc": "Ninguna key puede leer ni escribir. Los pausó {{user}} el {{date}}. Lo que ya corra en una terminal sigue hasta que lo cortes ahí.",
+      "active_desc": "Ninguna key puede leer ni escribir. Los pausó {{user}} ({{date}}). Lo que ya corra en una terminal sigue hasta que lo cortes ahí.",
       "who_resumes": "Reanuda un admin o un auditor.",
       "resume": "Reanudar",
       "one": "Pausar",

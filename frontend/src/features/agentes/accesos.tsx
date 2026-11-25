@@ -207,9 +207,7 @@ export function Accesos() {
           title: texto?.titulo ?? '',
           interpolation: { escapeValue: false },
         })}
-        confirmText={t(
-          `agentes.access.${texto?.cual ?? 'total'}_confirm`
-        )}
+        confirmText={t(`agentes.access.${texto?.cual ?? 'total'}_confirm`)}
         destructive
         isLoading={guardar.isPending}
         handleConfirm={() =>

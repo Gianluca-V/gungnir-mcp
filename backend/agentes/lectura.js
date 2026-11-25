@@ -124,10 +124,11 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
   router.get("/engagements/:id/propuestas", con("lectura"), ruta(async (req, res) => {
     const estado = opcion(req.query.estado, "estado", ["pendiente", "aprobada", "rechazada"]);
     await lista(req, res, {
-      sql: `SELECT id, accion, finding_id, estado, motivo, creada_en, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.title')) AS title,
+      sql: `SELECT id, accion, finding_id, estado, motivo, campos_editados, creada_en, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.title')) AS title,
               JSON_UNQUOTE(JSON_EXTRACT(datos,'$.affected_asset')) AS affected_asset, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.severity')) AS severity
             FROM agente_propuestas WHERE engagement_id=? AND key_id=?${estado ? " AND estado=?" : ""} ORDER BY creada_en DESC, id`,
       params: [req.engagement.id, req.agente.keyId, ...(estado ? [estado] : [])],
+      preparar: (p) => ({ ...p, campos_editados: p.campos_editados ? comoLista(p.campos_editados) : null }),
     });
   }));
 

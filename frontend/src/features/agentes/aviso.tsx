@@ -32,11 +32,7 @@ export function AvisoAgentes() {
           : 'bg-muted text-foreground hover:bg-accent'
       )}
     >
-      {data.pausa ? (
-        <Pause className='h-4 w-4' />
-      ) : (
-        <Bot className='h-4 w-4' />
-      )}
+      {data.pausa ? <Pause className='h-4 w-4' /> : <Bot className='h-4 w-4' />}
       {total > 0 && total}
     </Link>
   )

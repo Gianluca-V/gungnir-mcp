@@ -557,6 +557,85 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("editar antes de aprobar", () => {
+    const proponer = async (h = hallazgo()) => ({ h, id: (await ag("propuesta", "POST", `/engagements/${E.a}/hallazgos`, h)).json.propuesta_id });
+    const aprobar = (id, body, rol = "auditor") => panel(rol, "POST", `/propuestas/${id}/aprobar`, body);
+    const fila = async (id) => (await sql("SELECT * FROM agente_propuestas WHERE id=?", [id]))[0];
+    const json = (v) => (typeof v === "string" ? JSON.parse(v) : v);
+    test("🔴 se guarda lo editado, se conserva lo propuesto, se audita y el agente ve qué campos cambiaron", async () => {
+      const { h, id } = await proponer(hallazgo({ description: "Texto del agente" }));
+      const r = await aprobar(id, { datos: { ...h, severity: "low", recommendation: "Parchear" } });
+      assert.equal(r.status, 200, r.texto);
+      const f = (await sql("SELECT * FROM findings WHERE id=?", [r.json.finding_id]))[0];
+      assert.deepEqual([f.severity, f.initial_severity, f.recommendation, f.description], ["low", "low", "Parchear", "Texto del agente"]);
+      const p = await fila(id);
+      assert.equal(json(p.datos).severity, "high");
+      assert.equal(json(p.datos_aprobados).severity, "low");
+      const visto = (await ag("propuesta", "GET", `/engagements/${E.a}/propuestas?estado=aprobada`)).json.datos.find((x) => x.id === id);
+      assert.deepEqual(visto.campos_editados.sort(), ["recommendation", "severity"]);
+      assert.equal(await contar("audit_logs", "action='agente_propuesta_aprobar' AND entity_id=? AND detail LIKE '%Editada: %severity%'", [r.json.finding_id]), 1);
+    });
+    test("🔴 aprobar sin editar sigue igual, y mandar lo mismo no cuenta como edición", async () => {
+      for (const cuerpo of [(h) => undefined, (h) => ({}), (h) => ({ datos: { ...h } })]) {
+        const { h, id } = await proponer();
+        const r = await aprobar(id, cuerpo(h));
+        assert.equal(r.status, 200, r.texto);
+        const p = await fila(id);
+        assert.equal(p.datos_aprobados, null); assert.equal(p.campos_editados, null);
+        assert.equal((await ag("propuesta", "GET", `/engagements/${E.a}/propuestas?estado=aprobada`)).json.datos.find((x) => x.id === id).campos_editados, null);
+      }
+    });
+    test("🔴 lo editado pasa las mismas reglas: campos, valores, alcance, marcas y duplicados", async () => {
+      const { h, id } = await proponer();
+      for (const [datos, codigo] of [
+        [{ ...h, severity: "grave" }, 400], [{ ...h, status: "accepted" }, 400], [{ ...h, created_by: U.admin.id }, 400], [{ ...h, title: "" }, 400],
+        [{ ...h, cvss_score_31: 11 }, 400], [{ ...h, description: "[OCULTO:cred:0a1b2c]" }, 400], [null, 400], [[], 400], ["x", 400],
+        [{ severity: "low" }, 400], [{ ...h, affected_asset: "8.8.8.8" }, 409], [{ ...h, affected_asset: "10.10.5.5" }, 409],
+      ]) assert.equal((await aprobar(id, { datos })).status, codigo, JSON.stringify(datos));
+      const otro = hallazgo();
+      assert.equal((await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, otro)).status, 201);
+      assert.equal((await aprobar(id, { datos: { ...h, title: otro.title } })).status, 409);
+      assert.equal((await aprobar(id, { datos: h }, "lector")).status, 403);
+      assert.equal((await fila(id)).estado, "pendiente");
+      assert.equal(await contar("findings", "title=?", [h.title]), 0);
+      // Corregir el activo que salió del alcance permite aprobarla.
+      await sql("UPDATE scope_items SET in_scope=0 WHERE engagement_id=? AND value='10.10.0.0/16'", [E.a]);
+      const x = await aprobar(id, {}), y = await aprobar(id, { datos: { ...h, affected_asset: "app.ejemplo.com" } });
+      await sql("UPDATE scope_items SET in_scope=1 WHERE engagement_id=? AND value='10.10.0.0/16'", [E.a]);
+      assert.equal(x.status, 409); assert.equal(y.status, 200, y.texto);
+    });
+    test("🔴 en un cambio se puede corregir o sacar un campo, y lo demás no se toca", async () => {
+      const fid = (await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ description: "original", recommendation: "original" }))).json.hallazgo_id;
+      const id = (await ag("propuesta", "PUT", `/engagements/${E.a}/hallazgos/${fid}`, { severity: "critical", description: "del agente" })).json.propuesta_id;
+      assert.equal((await aprobar(id, { datos: {} })).status, 400);
+      await sql("UPDATE findings SET updated_at=NOW() - INTERVAL 1 HOUR WHERE id=?", [fid]);
+      const r = await aprobar(id, { datos: { severity: "medium" } });
+      assert.equal(r.status, 200, r.texto);
+      const f = (await sql("SELECT severity,description,recommendation FROM findings WHERE id=?", [fid]))[0];
+      assert.deepEqual({ ...f }, { severity: "medium", description: "original", recommendation: "original" });
+      assert.deepEqual(json((await fila(id)).campos_editados).sort(), ["description", "severity"]);
+    });
+    test("🔴 el detalle trae el valor actual de lo que cambia y avisa si se tocó después", async () => {
+      const fid = (await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ description: "original", references_list: ["https://a"] }))).json.hallazgo_id;
+      await sql("UPDATE findings SET updated_at=NOW() - INTERVAL 1 HOUR WHERE id=?", [fid]);
+      const id = (await ag("propuesta", "PUT", `/engagements/${E.a}/hallazgos/${fid}`, { description: "nuevo", references_list: ["https://b"] })).json.propuesta_id;
+      let d = (await panel("lector", "GET", `/propuestas/${id}`)).json;
+      assert.deepEqual(d.actual, { description: "original", references_list: ["https://a"] });
+      assert.deepEqual(d.datos, { description: "nuevo", references_list: ["https://b"] });
+      assert.equal(d.cambio, false);
+      await sql("UPDATE findings SET updated_at=NOW() + INTERVAL 5 SECOND WHERE id=?", [fid]);
+      assert.equal((await panel("lector", "GET", `/propuestas/${id}`)).json.cambio, true);
+      // Con conflicto, lo editado se puede forzar.
+      assert.equal((await aprobar(id, { datos: { description: "corregido" } })).json.conflicto, true);
+      assert.equal((await aprobar(id, { datos: { description: "corregido" }, forzar: true })).status, 200);
+      assert.equal((await sql("SELECT description FROM findings WHERE id=?", [fid]))[0].description, "corregido");
+      const nueva = await proponer();
+      d = (await panel("lector", "GET", `/propuestas/${nueva.id}`)).json;
+      assert.equal(d.actual, null); assert.equal(d.datos.title, nueva.h.title);
+      assert.equal((await panel("lector", "GET", `/propuestas/${uid()}`)).status, 404);
+    });
+  });
+
   describe("reintentos", () => {
     const clave = (k) => ({ headers: { "Idempotency-Key": k } });
     test("🔴 el mismo pedido repetido escribe una sola vez", async () => {
