@@ -11,6 +11,7 @@ const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const jwt = require("jsonwebtoken");
@@ -68,6 +69,7 @@ describe("agentes y personas a la vez", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_D
   after(async () => {
     try {
       if (pool) {
+        for (const f of await sql("SELECT filename FROM evidences WHERE engagement_id IN (?)", [E])) fs.rmSync(path.join(__dirname, "..", "..", "uploads", f.filename), { force: true });
         await sql("DELETE FROM engagements WHERE client_id=?", [CLIENTE]);
         await sql("DELETE FROM clients WHERE id=?", [CLIENTE]);
         await sql("DELETE FROM users WHERE id=?", [USUARIO]);
@@ -117,7 +119,13 @@ describe("agentes y personas a la vez", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_D
       const r = mapa(0, [{ objetivo: "10.10.252.1" }, { objetivo: "10.10.1.1", notas: "tarde", puertos: [{ puerto: 9 }] }]);
       await new Promise((ok) => setTimeout(ok, 300));
       assert.equal((await panel("DELETE", `/engagements/${E[0]}/targets/${id}`)).status, 200);
-      assert.ok([200, 409].includes((await r).status), (await r).texto);
+      assert.equal((await r).status, 409, (await r).texto);
+      const otro = (await sql("SELECT id FROM engagement_targets WHERE engagement_id=? AND ip_address='10.10.2.1'", [E[0]]))[0].id;
+      await sql("DELETE FROM engagement_targets WHERE ip_address='10.10.252.1'");
+      const s = mapa(0, [{ objetivo: "10.10.252.1" }, { objetivo: "10.10.2.1", comprometido: true }]);
+      await new Promise((ok) => setTimeout(ok, 300));
+      assert.equal((await panel("DELETE", `/engagements/${E[0]}/targets/${otro}`)).status, 200);
+      assert.equal((await s).status, 409, "sin puertos también: no puede decir que se conservó");
       assert.equal((await sql("SELECT COUNT(*) AS n FROM target_ports p LEFT JOIN engagement_targets t ON t.id=p.target_id WHERE t.id IS NULL"))[0].n, 0);
     } finally { await sql("DROP TRIGGER IF EXISTS mapa_lento"); }
   });

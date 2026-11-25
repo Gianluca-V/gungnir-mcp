@@ -70,7 +70,14 @@ export function FormularioMapa({ detalle, ocupado, cerrar, aprobar }: Props) {
   const equipos = equiposDe(detalle.datos)
   const [sacados, setSacados] = useState<Set<string>>(new Set())
   // Un equipo cuyo origen se sacó va sin él: si no, el pedido entero se rechaza.
-  const sinOrigen = (e: EquipoMapa) => !!e.desde && sacados.has(e.desde)
+  const origenes = (detalle.actual?.origenes ?? {}) as Record<
+    string,
+    { en_mapa: boolean; en_pedido: string | null }
+  >
+  const sinOrigen = (e: EquipoMapa) => {
+    const o = e.desde ? origenes[e.desde] : undefined
+    return !!o && !o.en_mapa && !!o.en_pedido && sacados.has(o.en_pedido)
+  }
   const quedan = equipos
     .filter((e) => !sacados.has(e.objetivo))
     .map((e) => (sinOrigen(e) ? { ...e, desde: undefined } : e))

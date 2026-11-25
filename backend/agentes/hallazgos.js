@@ -60,7 +60,9 @@ function validar(b, { alta }) {
 
 // Lo que, si cambia, hace que una propuesta sobre el hallazgo se tenga que mirar de nuevo.
 const COLUMNAS_HUELLA = [...CAMPOS, "remediation_due_date", "retest_status", "retest_severity", "retest_notes", "retested_at", "risk_accepted_reason", "risk_accepted_at"];
-const huellaDe = (f) => crypto.createHash("sha256").update(JSON.stringify(COLUMNAS_HUELLA.map((k) => f[k] ?? null))).digest("hex");
+// Una fecha se toma como está guardada, no en la zona horaria del servidor.
+const fijo = (v) => (v instanceof Date ? [v.getFullYear(), v.getMonth(), v.getDate(), v.getHours(), v.getMinutes(), v.getSeconds()] : v ?? null);
+const huellaDe = (f) => crypto.createHash("sha256").update(JSON.stringify(COLUMNAS_HUELLA.map((k) => fijo(f[k])))).digest("hex");
 
 const aColumna = (k, v) => (k === "references_list" && v ? JSON.stringify(v) : v ?? null);
 

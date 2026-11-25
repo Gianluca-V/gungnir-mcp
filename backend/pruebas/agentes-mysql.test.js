@@ -269,12 +269,31 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
           assert.equal((await cambiar({ severity: "low" })).status, 422, activo);
           assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 1);
         }
-        assert.ok([200, 202].includes((await cambiar({ affected_asset: "10.10.1.1" })).status), "corregirlo sí se puede");
-        for (const activo of ["srv-web (10.10.1.1) 80/tcp", "", null]) {
+        // Cambiarle el activo en el mismo pedido no lo saltea: lo corrige una persona.
+        for (const activo of ["8.8.8.8", "evil.test", "https://evil.test/x", "evil.test:443", "8.8.0.0/24", "evil.test (prod)", "srv (8.8.8.8) 443/tcp", "10.10.1.1, 8.8.8.8", "Portal 10.10.5.5", "[2001:db8::9]:443"]) {
+          await sql("UPDATE findings SET affected_asset=? WHERE id=?", [activo, fid]);
+          assert.equal((await cambiar({ affected_asset: "10.10.1.1", title: uid() })).status, 422, activo);
+          assert.equal((await cambiar({ severity: "low" })).status, 422, activo);
+        }
+        // Una etiqueta de una persona o del seguimiento no es un objetivo: no se juzga ni se denuncia.
+        const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+        for (const activo of ["srv-web (10.10.1.1) 80/tcp", "", null, "Portal", "Aplicación web", "N/A", "Dockerfile", "src/db.js:42", "org/app", "github.com/org/app src/db.js:42", "srv-web", "s3://balde", "server.js", "10.10.1.1:80/tcp", "app.ejemplo.com", "https://app.ejemplo.com/x", "v1.2.3"]) {
           await sql("UPDATE findings SET affected_asset=? WHERE id=?", [activo, fid]);
           assert.ok([200, 202].includes((await cambiar({ severity: "low", description: uid() })).status), String(activo));
         }
+        assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes);
       }
+    });
+    test("🔴 sin alcance cargado, una etiqueta tampoco impide completar un hallazgo", async () => {
+      const antes = await sql("SELECT * FROM scope_items WHERE engagement_id=?", [E.a]);
+      const fid = (await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo())).json.hallazgo_id;
+      try {
+        await sql("DELETE FROM scope_items WHERE engagement_id=?", [E.a]);
+        await sql("UPDATE findings SET affected_asset='Portal' WHERE id=?", [fid]);
+        assert.equal((await ag("escritura", "PUT", `/engagements/${E.a}/hallazgos/${fid}`, { severity: "low" })).status, 200);
+        await sql("UPDATE findings SET affected_asset='10.10.1.1' WHERE id=?", [fid]);
+        assert.equal((await ag("escritura", "PUT", `/engagements/${E.a}/hallazgos/${fid}`, { severity: "low" })).status, 422);
+      } finally { for (const a of antes) await sql("INSERT INTO scope_items (id,engagement_id,type,value,in_scope) VALUES (?,?,?,?,?)", [a.id, E.a, a.type, a.value, a.in_scope]); }
     });
     test("un comando sin objetivo no entra", async () => {
       assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/logs`, { fase: "recon", comando: "nmap" })).status, 400);
@@ -1078,6 +1097,12 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       await sql("UPDATE target_ports SET version='' WHERE target_id=? AND port_number=22", [id]);
       assert.equal((await mandar("escritura", e)).json.puertos_completados, 1);
     });
+    test("el detalle dice de dónde sale cada pivote, para poder sacar equipos sin romperlo", async () => {
+      await limpio(); await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
+      await agregar({ ip: "10.10.1.9" });
+      const p = (await mandar("propuesta", [{ objetivo: "10.10.1.1" }, { objetivo: "10.10.1.2", desde: "::ffff:10.10.1.1" }, { objetivo: "10.10.1.3", desde: "10.10.1.9" }, { objetivo: "10.10.1.9" }])).json.propuesta_id;
+      assert.deepEqual((await panel("lector", "GET", `/propuestas/${p}`)).json.actual, { origenes: { "::ffff:10.10.1.1": { en_mapa: false, en_pedido: "10.10.1.1" }, "10.10.1.9": { en_mapa: true, en_pedido: "10.10.1.9" } } });
+    });
     test("🔴 aprobar sin cambios desde el diálogo no cuenta como edición", async () => {
       await limpio(); await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
       const p = (await mandar("propuesta", [COMPLETO])).json.propuesta_id;
@@ -1319,6 +1344,12 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       assert.equal(Number(b.headers.get("ratelimit-remaining")), Number(a.headers.get("ratelimit-remaining")) - 1);
       const d = await esperar("act10", (y) => y.length === 2);
       assert.deepEqual(d.map((y) => [y.accion, y.codigo]), [["log", 413], ["log", 400]]);
+      const gz = await fetch(`${base}${V1}/engagements/${E.a}/logs`, { method: "POST", headers: { Authorization: `Bearer ${keys.act10}`, "Content-Type": "application/json", "Content-Encoding": "gzip" }, body: Buffer.from("no es gzip") });
+      assert.equal(gz.status, 400);
+      const cupo = async () => Number((await ag("act10", "GET", "/yo")).headers.get("ratelimit-remaining")), c0 = await cupo();
+      for (const u of ["/engagements/%", "/engagements/%E0%A4%A"]) assert.equal((await ag("act10", "GET", u)).status, 400, u);
+      assert.equal(await cupo(), c0 - 3, "cada pedido gasta una vez");
+      assert.equal((await fetch(`${base}${V1}/engagements/%`)).status === 400, false, "sin key no entra");
       const p = await fetch(`${base}/api/agentes/pausa`, { method: "POST", headers: { Authorization: `Bearer ${token("admin")}`, "Content-Type": "application/json" }, body: "{mal" });
       assert.equal(p.status, 400, "el panel sigue igual");
     });

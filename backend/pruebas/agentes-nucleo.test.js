@@ -297,3 +297,9 @@ describe("reintento ante un bloqueo mutuo", () => {
     assert.equal(n, 5);
   });
 });
+
+test("🔴 la huella de un hallazgo no depende de la zona horaria del servidor", () => {
+  const { execFileSync } = require("node:child_process");
+  const ver = (TZ) => execFileSync(process.execPath, ["-e", `const H=require(${JSON.stringify(require.resolve("../agentes/hallazgos"))});process.stdout.write(H.huellaDe({title:"x",remediation_due_date:new Date(2030,4,7),retested_at:new Date(2030,4,7,23,59,1)}))`], { env: { ...process.env, TZ } }).toString();
+  assert.equal(ver("UTC"), ver("America/Argentina/Buenos_Aires"));
+});

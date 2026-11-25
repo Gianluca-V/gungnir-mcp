@@ -124,7 +124,11 @@ async function aplicar(tx, engagementId, { equipos }) {
   filas.forEach(sumar);
   const r = { equipos_nuevos: 0, equipos_completados: 0, puertos_nuevos: 0, puertos_completados: 0, pivotes_nuevos: 0, conservados: [] };
   /** Escribe una columna si sigue vacía. mysql2 cuenta las filas que cumplen la condición. */
-  const siVacia = async (tabla, columna, valor, id, vacia) => (await tx.qRun(`UPDATE ${tabla} SET ${columna}=? WHERE id=? AND ${vacia}`, [valor, id]))[0].affectedRows > 0;
+  const siVacia = async (tabla, columna, valor, id, vacia) => {
+    if ((await tx.qRun(`UPDATE ${tabla} SET ${columna}=? WHERE id=? AND ${vacia}`, [valor, id]))[0].affectedRows > 0) return true;
+    if (!(await tx.qRow(`SELECT id FROM ${tabla} WHERE id=? LOCK IN SHARE MODE`, [id]))) throw mapaCambio();
+    return false;
+  };
   const pares = [];
   for (const e of equipos) {
     const conservar = (campo) => r.conservados.push({ objetivo: e.objetivo, campo });
@@ -171,8 +175,9 @@ async function aplicar(tx, engagementId, { equipos }) {
 }
 
 /** Alguien borró el equipo mientras tanto: se deshace todo y se pide repetir. */
+const mapaCambio = () => new ErrorHttp(409, "El mapa cambió mientras se guardaba y no se guardó nada. Volvé a leerlo y repetí el pedido.");
 function seBorro(e) {
-  if (String(e?.code).startsWith("ER_NO_REFERENCED_ROW")) throw new ErrorHttp(409, "El mapa cambió mientras se guardaba y no se guardó nada. Volvé a leerlo y repetí el pedido.");
+  if (String(e?.code).startsWith("ER_NO_REFERENCED_ROW")) throw mapaCambio();
   throw e;
 }
 
@@ -201,4 +206,12 @@ async function aplicarPuertos(tx, engagementId, t, nuevo, puertos, r, conservar,
   }
 }
 
-module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, mismoPedido, canonico };
+/** De dónde sale cada pivote propuesto: si el origen ya está en el mapa, y con qué equipo del pedido coincide. */
+async function origenesDe(q, engagementId, { equipos }) {
+  const filas = await q.qRows("SELECT ip_address,fqdn,url_address FROM engagement_targets WHERE engagement_id=?", [engagementId]);
+  const enMapa = new Set(filas.flatMap((t) => nombresDe(t).map(claveDe)));
+  const enPedido = new Map(equipos.map((e) => [claveDe(e.objetivo), e.objetivo]));
+  return Object.fromEntries(equipos.filter((e) => e.desde).map(({ desde }) => [desde, { en_mapa: enMapa.has(claveDe(desde)), en_pedido: enPedido.get(claveDe(desde)) ?? null }]));
+}
+
+module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, origenesDe, mismoPedido, canonico };

@@ -16,7 +16,7 @@ const importacion = require("./importacion");
 const mapa = require("./mapa");
 const retest = require("./retest");
 const { comoObjeto } = require("./aprobacion");
-const { evaluar, evaluador } = require("./alcance");
+const { evaluar, evaluador, objetivosClaros } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion, reintentando } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
@@ -139,9 +139,9 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
   }));
 
   // ── Hallazgos ───────────────────────────────────────────────────────────────
-  const exigirActivoEnAlcance = async (tx, req, activo, { que = "El hallazgo", campo = "affected_asset", admiteIlegible = false } = {}) => {
+  const exigirActivoEnAlcance = async (tx, req, activo, { que = "El hallazgo", campo = "affected_asset" } = {}) => {
     const a = evaluar(activo, await alcanceDe(tx, req.engagement.id));
-    if (a.dentro || (admiteIlegible && a.ilegible)) return;
+    if (a.dentro) return;
     const e = new ErrorHttp(422, `${que} se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "${campo}" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
     e.violaciones = [{ tipo: "hallazgo", objetivo: activo, motivo: a.motivo }];
     throw e;
@@ -170,9 +170,9 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     const f = await tx.qRow(`SELECT id, ${H.COLUMNAS_HUELLA.join(", ")} FROM findings WHERE id=? AND engagement_id=? FOR UPDATE`, [req.params.fid, req.engagement.id]);
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
     if (f.status === "accepted" && datos.status) throw new ErrorHttp(409, "Una persona aceptó el riesgo de este hallazgo: su estado no se cambia desde acá.");
-    // Sin activo nuevo vale el que tiene. Uno que escribió una persona y no es un objetivo no se puede juzgar.
+    // El activo que ya tiene también cuenta, aunque se lo quiera cambiar: eso lo corrige una persona.
+    for (const o of objetivosClaros(f.affected_asset)) await exigirActivoEnAlcance(tx, req, o, { que: "El cambio" });
     if (datos.affected_asset) await exigirActivoEnAlcance(tx, req, datos.affected_asset);
-    else if (f.affected_asset) await exigirActivoEnAlcance(tx, req, f.affected_asset, { que: "El cambio", admiteIlegible: true });
     if (!N.alcanza(req.engagement.nivel, "escritura")) {
       const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "actualizar", findingId: f.id, datos, huella: H.huellaDe(f) });
       return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El cambio queda a la espera de aprobación." },

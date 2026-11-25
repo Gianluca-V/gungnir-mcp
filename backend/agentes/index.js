@@ -48,9 +48,14 @@ function montar(app, deps) {
   ilegible.use(...entrada);
   ilegible.use((req, res) => res.status(req.errorDeCuerpo.codigo).json({ error: req.errorDeCuerpo.mensaje }));
   app.use(BASE, (err, req, res, next) => {
-    if (!/^(entity|encoding|charset|request)\./.test(err?.type || "")) return next(err);
-    const codigo = err.status >= 400 && err.status < 500 ? err.status : 400;
-    req.errorDeCuerpo = { codigo, mensaje: codigo === 413 ? "El pedido supera los 2 MB. Subí lo grande como evidencia." : err.type === "entity.parse.failed" ? "JSON inválido en el cuerpo del pedido." : "El cuerpo del pedido no se puede leer." };
+    const deCuerpo = /^(entity|encoding|charset|request)\./.test(err?.type || "") || /^Z_/.test(err?.code || "");
+    if (!deCuerpo && !(err instanceof URIError)) return next(err);
+    const codigo = deCuerpo && err.status >= 400 && err.status < 500 ? err.status : 400;
+    const mensaje = !deCuerpo ? "La dirección del pedido no se puede leer."
+      : codigo === 413 ? "El pedido supera los 2 MB. Subí lo grande como evidencia."
+        : err.type === "entity.parse.failed" ? "JSON inválido en el cuerpo del pedido." : "El cuerpo del pedido no se puede leer.";
+    if (req.agente) return res.status(codigo).json({ error: mensaje }); // Ya pasó por la entrada.
+    req.errorDeCuerpo = { codigo, mensaje };
     ilegible(req, res, next);
   });
 

@@ -233,13 +233,27 @@ function evaluarPreparado(objetivo, si, no) {
   if (si.libres.has(normal(texto))) return { dentro: true, motivo: null };
   if (!si.red.length && !si.libres.size) return { dentro: false, motivo: "El engagement no tiene objetivos dentro de alcance." };
   if (!partes.length) return { dentro: false, motivo: "No se indicó un objetivo." };
-  // Una descripción de una persona ("srv-web (10.0.0.5) 443/tcp") no es un objetivo: no se puede juzgar.
-  const ilegible = partes.some(([, t]) => !t || (partes.length > 1 && t.host && !t.host.includes(".")));
   for (const [parte, t] of partes) {
-    if (!t) return { dentro: false, ilegible, motivo: `No se puede interpretar el objetivo "${parte}".` };
-    if (!si.red.some((e) => cubre(e, t))) return { dentro: false, ilegible, motivo: `"${parte}" no está en el alcance.` };
+    if (!t) return { dentro: false, motivo: `No se puede interpretar el objetivo "${parte}".` };
+    if (!si.red.some((e) => cubre(e, t))) return { dentro: false, motivo: `"${parte}" no está en el alcance.` };
   }
   return { dentro: true, motivo: null };
 }
 
-module.exports = { evaluar, evaluador, leer };
+// Con punto y todo, son archivos y no equipos.
+const ARCHIVO = /\.(?:js|jsx|ts|tsx|mjs|cjs|py|rb|php|java|go|rs|cs|c|h|cpp|sh|ps1|sql|json|ya?ml|xml|html?|css|md|txt|lock|toml|ini|conf|cfg|env|properties|gradle|tf)$/i;
+/**
+ * Los objetivos claros dentro de un texto que escribió una persona: direcciones, nombres con punto y URL.
+ * "srv-web (10.0.0.5) 443/tcp" da 10.0.0.5. Una etiqueta ("Portal", "src/db.js:42") no da ninguno.
+ */
+function objetivosClaros(texto) {
+  return String(texto ?? "").split(/[\s,;()"'<>]+/).filter((p) => {
+    if (/^https?:\/\//i.test(p)) return leer(p) !== null;
+    const t = leer(p);
+    if (!t) return false;
+    if (tieneIp(t)) return t.clase === "ip";
+    return t.clase === "host" && t.host.includes(".") && /\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/.test(t.host) && !ARCHIVO.test(t.host);
+  });
+}
+
+module.exports = { evaluar, evaluador, leer, objetivosClaros };

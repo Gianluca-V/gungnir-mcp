@@ -77,7 +77,7 @@ const TIPOS = {
     antes: (tx, p) => tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]),
     validar: (d) => mapa.validar(d),
     objetivos: (d) => d.equipos.flatMap(mapa.objetivosDe),
-    actual: async () => null,
+    actual: async (q, p, datos) => ({ actual: { origenes: await mapa.origenesDe(q, p.engagement_id, datos) } }),
     async aplicar(tx, p, datos) {
       return { findingId: null, resultado: await mapa.aplicar(tx, p.engagement_id, datos) };
     },
