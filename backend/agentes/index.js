@@ -13,6 +13,7 @@ const panel = require("./panel");
 const lectura = require("./lectura");
 const escritura = require("./escritura");
 const cve = require("./cve");
+const actividad = require("./actividad");
 
 const BASE = "/api/agente/v1";
 const escaparHtml = (s) => (s == null ? s : String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`));
@@ -35,7 +36,7 @@ function montar(app, deps) {
   const notificar = (id, titulo) => avisarSeguro(id, () => ({ name: escaparHtml(titulo) }));
 
   const router = express.Router();
-  router.use(acceso.limitePorIp, acceso.autenticar, acceso.limitePorKey, acceso.sinPausa);
+  router.use(acceso.limitePorIp, actividad.crear({ qRun }).registrar, acceso.autenticar, acceso.limitePorKey, acceso.sinPausa);
   lectura.montar(router, { ...deps, acceso, buscarCve: cve.crear() });
   escritura.montar(router, { ...deps, acceso, notificar });
   router.use((req, res) => res.status(404).json({ error: "Ruta inexistente." }));

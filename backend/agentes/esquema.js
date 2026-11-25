@@ -93,6 +93,24 @@ async function crearTablas({ qRun }) {
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 
+  await qRun(`CREATE TABLE IF NOT EXISTS agente_actividad (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    key_id VARCHAR(36) NOT NULL,
+    engagement_id VARCHAR(36) NULL,
+    accion VARCHAR(30) NOT NULL,
+    codigo SMALLINT NOT NULL,
+    objetivo VARCHAR(500) NULL,
+    detalle VARCHAR(500) NULL,
+    fuera TINYINT(1) NOT NULL DEFAULT 0,
+    veces INT UNSIGNED NOT NULL DEFAULT 1,
+    creada_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ultima_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_key (key_id, id),
+    INDEX idx_ultima (ultima_en),
+    FOREIGN KEY (key_id) REFERENCES agente_keys(id) ON DELETE CASCADE,
+    FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE SET NULL
+  ) ${FIN}`);
+
   await qRun(`CREATE TABLE IF NOT EXISTS agente_idempotencia (
     key_id VARCHAR(36) NOT NULL,
     clave VARCHAR(100) NOT NULL,

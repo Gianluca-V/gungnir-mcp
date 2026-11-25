@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Pencil, Plus } from 'lucide-react'
+import { Ban, History, Pencil, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
@@ -15,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Actividad } from './actividad'
 import { Estado, InsigniaNivel, useFechaHora, type KeyAgente } from './comun'
 import { DialogoKey } from './dialogo-key'
 
@@ -24,6 +25,7 @@ export function Keys() {
   const fecha = useFechaHora()
   const miId = useAuthStore((s) => s.auth.user?.id)
   const [dialogo, setDialogo] = useState<{ key: KeyAgente | null } | null>(null)
+  const [actividad, setActividad] = useState<KeyAgente | null>(null)
   const [aRevocar, setARevocar] = useState<KeyAgente | null>(null)
 
   const consulta = useQuery<KeyAgente[]>({
@@ -117,6 +119,16 @@ export function Keys() {
                       {t(`agentes.keys.${estado}`)}
                     </TableCell>
                     <TableCell className='text-right'>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='size-8'
+                        aria-label={`${t('agentes.activity.open')}: ${k.nombre}`}
+                        title={t('agentes.activity.open')}
+                        onClick={() => setActividad(k)}
+                      >
+                        <History />
+                      </Button>
                       {!k.revocada_en && (
                         <>
                           <Button
@@ -150,6 +162,9 @@ export function Keys() {
         </div>
       </Estado>
 
+      {actividad && (
+        <Actividad de={actividad} cerrar={() => setActividad(null)} />
+      )}
       {dialogo && (
         <DialogoKey existente={dialogo.key} cerrar={() => setDialogo(null)} />
       )}

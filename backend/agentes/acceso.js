@@ -61,7 +61,10 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
     message: { error: "La key superó su límite de pedidos. Reintentá en unos minutos." },
   });
 
-  const rechazar = (req, res, mensaje) => limiteFallidos(req, res, () => res.status(401).json({ error: mensaje }));
+  const rechazar = (req, res, mensaje) => {
+    req.motivoRechazo = mensaje;
+    return limiteFallidos(req, res, () => res.status(401).json({ error: mensaje }));
+  };
 
   const autenticar = ruta(async (req, res, next) => {
     const key = keyDe(req);
@@ -74,6 +77,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
               (SELECT p.pausado_en IS NOT NULL FROM agente_pausa p WHERE p.id=1) AS pausado
        FROM agente_keys k JOIN users u ON u.id=k.user_id WHERE k.hash=?`, [hash]);
     if (!k || !k.is_active || k.revocada || k.vencida || k.must_change_password) conocidas.delete(hash);
+    if (k) req.keyRechazada = k.id; // Solo para su actividad, si se la rechaza.
     if (!k || !k.is_active) return rechazar(req, res, "La key no es válida.");
     if (k.revocada) return rechazar(req, res, "La key fue revocada.");
     if (k.vencida) return rechazar(req, res, "La key está vencida.");
@@ -119,6 +123,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
        WHERE e.id=?`, [req.agente.keyId, req.params.id]);
     const nivel = e ? N.efectivo(req.agente.nivelMax, e.nivel_max, N.techoDeEstado(e.status)) : "ninguno";
     if (nivel === "ninguno") throw new ErrorHttp(404, "El engagement no existe o la key no tiene acceso.");
+    req.engagementId = e.id;
     if (e.pausado_en) throw enPausa("Engagement en pausa: lo decidió una persona.");
     if (!N.alcanza(nivel, minimo))
       throw new ErrorHttp(403, `Esta acción necesita el nivel "${minimo}" y acá el nivel efectivo es "${nivel}". Lo cambia una persona desde el panel.`, { nivel_requerido: minimo, nivel_efectivo: nivel });

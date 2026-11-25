@@ -636,6 +636,101 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("actividad por key", () => {
+    const ver = (rol, key, q = "") => panel(rol, "GET", `/keys/${keys[`${key}_id`]}/actividad${q}`);
+    // Se anota sin demorar la respuesta: se espera a que aparezca.
+    async function esperar(key, cumple, q = "") {
+      for (let i = 0; ; i++) {
+        const r = await ver("admin", key, q);
+        if (cumple(r.json?.datos || [])) return r.json.datos;
+        if (i > 60) assert.fail(JSON.stringify(r.json).slice(0, 1500));
+        await new Promise((ok) => setTimeout(ok, 50));
+      }
+    }
+    before(async () => { await nuevaKey("act", "pentester", "escritura", [E.a]); });
+    test("🔴 muestra escrituras y rechazos con su engagement, de lo más nuevo a lo más viejo, y no las lecturas", async () => {
+      const h = hallazgo();
+      assert.equal((await ag("act", "GET", `/engagements/${E.a}/hallazgos`)).status, 200);
+      assert.equal((await ag("act", "POST", `/engagements/${E.a}/alcance/verificar`, { objetivos: ["10.10.1.1"] })).status, 200);
+      assert.equal((await ag("act", "POST", `/engagements/${E.a}/hallazgos`, h)).status, 201);
+      assert.equal((await ag("act", "POST", `/engagements/${E.a}/logs`, { fase: "recon", objetivo: "10.10.1.1", herramienta: "nmap", comando: "nmap 10.10.1.1" })).status, 201);
+      assert.equal((await ag("act", "DELETE", `/engagements/${E.a}/logs/${uid()}`)).status, 403);
+      assert.equal((await ag("act", "GET", `/engagements/${E.b}`)).status, 404);
+      const d = await esperar("act", (x) => x.length === 4);
+      assert.deepEqual(d.map((x) => [x.accion, x.codigo, x.fuera]), [["consulta", 404, false], ["log_borrar", 403, false], ["log", 201, false], ["hallazgo_crear", 201, false]]);
+      assert.equal(d[3].objetivo, `${h.title} · ${h.affected_asset}`);
+      assert.equal(d[3].engagement_title, "Pentest Banco Ficticio a");
+      assert.equal(d[2].detalle, "nmap 10.10.1.1");
+      assert.match(d[1].detalle, /nivel "total"/);
+      assert.equal(d[1].engagement_title, "Pentest Banco Ficticio a");
+      assert.equal(d[0].engagement_title, null, "uno ajeno no se nombra");
+    });
+    test("🔴 marca lo que quedó fuera de alcance, se haya guardado o rechazado", async () => {
+      await ag("act", "POST", `/engagements/${E.a}/logs`, { fase: "recon", objetivo: "8.8.8.8", comando: "ping 8.8.8.8" });
+      await ag("act", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ affected_asset: "8.8.8.8" }));
+      const d = await esperar("act", (x) => x.length === 2, "?filtro=fuera");
+      assert.deepEqual(d.map((x) => x.codigo), [422, 201]);
+      const r = await esperar("act", (x) => x.length === 3, "?filtro=rechazos");
+      assert.ok(r.every((x) => x.codigo >= 400));
+      assert.equal((await ver("admin", "act", "?filtro=otro")).status, 400);
+    });
+    test("🔴 lo rechazado que se repite se agrupa, y una escritura que se guarda no", async () => {
+      await nuevaKey("act2", "pentester", "escritura", [E.a]);
+      const id = uid();
+      for (let i = 0; i < 5; i++) await ag("act2", "DELETE", `/engagements/${E.a}/logs/${id}`);
+      const log = { fase: "recon", notas: "igual" };
+      for (let i = 0; i < 2; i++) await ag("act2", "POST", `/engagements/${E.a}/logs`, log);
+      await ag("act2", "DELETE", `/engagements/${E.a}/logs/${id}`);
+      const d = await esperar("act2", (x) => x.length === 4);
+      assert.deepEqual(d.map((x) => [x.accion, x.veces]), [["log_borrar", 1], ["log", 1], ["log", 1], ["log_borrar", 5]]);
+    });
+    test("🔴 la ve su dueño y el admin; nadie más, y ningún agente", async () => {
+      assert.equal((await ver("pentester", "act")).status, 200);
+      for (const rol of ["auditor", "lector"]) assert.equal((await ver(rol, "act")).status, 404);
+      assert.equal((await ver("pentester", "total")).status, 404);
+      assert.equal((await ag("act", "GET", `/keys/${keys.act_id}/actividad`)).status, 404);
+    });
+    test("🔴 usar una key revocada queda en su actividad; una inventada no deja nada", async () => {
+      await nuevaKey("act3", "pentester", "lectura", [E.a]);
+      const total = () => contar("agente_actividad");
+      assert.equal((await panel("admin", "DELETE", `/keys/${keys.act3_id}`)).status, 200);
+      const antes = await total();
+      await ag("gnga_" + "2".repeat(64), "GET", "/yo");
+      await ag("act3", "GET", "/yo");
+      const d = await esperar("act3", (x) => x.length === 1);
+      assert.match(d[0].detalle, /revocada/);
+      assert.equal(d[0].codigo, 401);
+      assert.equal(await total(), antes + 1);
+    });
+    test("se pagina hacia atrás sin repetir ni saltear", async () => {
+      await nuevaKey("act4", "pentester", "escritura", [E.a]);
+      for (let i = 0; i < 60; i++) await ag("act4", "POST", `/engagements/${E.a}/logs`, { fase: "recon", notas: `n${i}` });
+      const uno = await esperar("act4", (x) => x.length === 50 && x[0].id);
+      let r = await ver("admin", "act4");
+      for (let i = 0; i < 40 && Number((await sql("SELECT COUNT(*) AS n FROM agente_actividad WHERE key_id=?", [keys.act4_id]))[0].n) < 60; i++) await new Promise((ok) => setTimeout(ok, 50));
+      r = await ver("admin", "act4");
+      const dos = await ver("admin", "act4", `?antes=${r.json.siguiente}`);
+      assert.equal(uno.length, 50);
+      assert.equal(dos.json.datos.length, 10);
+      assert.equal(dos.json.siguiente, null);
+      assert.equal(new Set([...r.json.datos, ...dos.json.datos].map((x) => x.id)).size, 60);
+      assert.equal((await ver("admin", "act4", "?antes=x")).status, 400);
+    });
+    test("🔴 si no se puede anotar, la escritura responde igual", async () => {
+      await sql("RENAME TABLE agente_actividad TO agente_actividad_x");
+      try { assert.equal((await ag("act", "POST", `/engagements/${E.a}/logs`, { fase: "recon", notas: "x" })).status, 201); }
+      finally { await sql("RENAME TABLE agente_actividad_x TO agente_actividad"); }
+    });
+    test("un reintento con la misma clave cuenta una vez, y los datos raros no rompen nada", async () => {
+      await nuevaKey("act5", "pentester", "escritura", [E.a]);
+      const k = { headers: { "Idempotency-Key": uid() } }, log = { fase: "recon", notas: "una" };
+      for (let i = 0; i < 3; i++) assert.equal((await ag("act5", "POST", `/engagements/${E.a}/logs`, log, k)).status, 201);
+      assert.equal((await ag("act5", "POST", `/engagements/${E.a}/logs`, { fase: "recon", objetivo: { a: 1 }, comando: ["x"] })).status, 400);
+      const d = await esperar("act5", (x) => x.length === 2);
+      assert.equal(d[0].objetivo, null);
+    });
+  });
+
   describe("pausa", () => {
     const pausar = (rol, pausado, e) => panel(rol, "POST", e ? `/engagements/${E[e]}/pausa` : "/pausa", { pausado });
     const reanudarTodo = async () => { await pausar("admin", false); await pausar("admin", false, "a"); };

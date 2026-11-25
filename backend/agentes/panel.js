@@ -14,6 +14,7 @@ const ESCRIBEN = ["admin", "auditor", "pentester"];
 const ADMINISTRAN = ["admin", "auditor"];
 const DIAS_POR_DEFECTO = 30;
 const DIAS_MAX = 365;
+const POR_PAGINA = 50;
 
 const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
 
@@ -97,6 +98,19 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     await qRun("UPDATE agente_keys SET revocada_en=COALESCE(revocada_en,NOW()) WHERE id=?", [k.id]);
     await anotar(req, "agente_key_revocar", "agente_keys", k.id, k.nombre);
     res.json({ ok: true });
+  }));
+
+  app.get("/api/agentes/keys/:id/actividad", auth(), ruta(async (req, res) => {
+    const k = await keyPropia(req);
+    const filtro = opcion(req.query.filtro, "filtro", ["rechazos", "fuera"]);
+    const antes = entero(req.query.antes, "antes", { min: 1, max: Number.MAX_SAFE_INTEGER, porDefecto: null });
+    const filas = await qRows(
+      `SELECT a.id, a.accion, a.codigo, a.objetivo, a.detalle, a.fuera, a.veces, a.creada_en, a.ultima_en, e.title AS engagement_title
+       FROM agente_actividad a LEFT JOIN engagements e ON e.id=a.engagement_id
+       WHERE a.key_id=?${antes ? " AND a.id<?" : ""}${filtro === "rechazos" ? " AND a.codigo>=400" : filtro === "fuera" ? " AND a.fuera=1" : ""}
+       ORDER BY a.id DESC LIMIT ${POR_PAGINA + 1}`, [k.id, ...(antes ? [antes] : [])]);
+    const datos = filas.slice(0, POR_PAGINA).map((x) => ({ ...x, fuera: Boolean(x.fuera) }));
+    res.json({ datos, siguiente: filas.length > POR_PAGINA ? datos.at(-1).id : null });
   }));
 
   // ── Acceso por engagement ───────────────────────────────────────────────────
