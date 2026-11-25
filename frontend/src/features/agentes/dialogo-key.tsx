@@ -36,7 +36,9 @@ export function DialogoKey({ existente, cerrar }: Props) {
   const qc = useQueryClient()
   const { rol } = usePermisosAgentes()
   const [nombre, setNombre] = useState('')
-  const [nivel, setNivel] = useState<Nivel>(existente?.nivel_max ?? 'lectura')
+  const [nivel, setNivel] = useState<Nivel>(
+    rol === 'lector' ? 'lectura' : (existente?.nivel_max ?? 'lectura')
+  )
   const [dias, setDias] = useState('30')
   const [filtro, setFiltro] = useState('')
   const [elegidos, setElegidos] = useState(
@@ -44,10 +46,18 @@ export function DialogoKey({ existente, cerrar }: Props) {
   )
   const [creada, setCreada] = useState<string | null>(null)
 
-  const { data: engagements = [] } = useQuery<EngagementAcceso[]>({
+  const consulta = useQuery<EngagementAcceso[]>({
     queryKey: ['agentes', 'engagements'],
     queryFn: () => apiFetch<EngagementAcceso[]>('/agentes/engagements'),
   })
+  // Los que la key ya tiene se muestran aunque no vengan en la lista: si no, no se podrían quitar.
+  const lista = consulta.data ?? []
+  const engagements = [
+    ...lista,
+    ...(existente?.engagements ?? [])
+      .filter((e) => !lista.some((x) => x.id === e.id))
+      .map((e) => ({ ...e, client_name: '', nivel_max: 'lectura' as Nivel })),
+  ]
   const guardar = useMutation({
     mutationFn: () => {
       const comun = { nivel_max: nivel, engagements: [...elegidos] }
@@ -82,7 +92,9 @@ export function DialogoKey({ existente, cerrar }: Props) {
   )
   const niveles = rol === 'lector' ? NIVELES_KEY.slice(0, 1) : NIVELES_KEY
   const listo =
-    elegidos.size > 0 && (existente || (nombre.trim() && diasValidos))
+    elegidos.size > 0 &&
+    consulta.isSuccess &&
+    (existente || (nombre.trim() && diasValidos))
 
   function alternar(id: string, v: boolean) {
     const s = new Set(elegidos)
@@ -92,7 +104,7 @@ export function DialogoKey({ existente, cerrar }: Props) {
   }
 
   return (
-    <Dialog open onOpenChange={(v) => !v && cerrar()}>
+    <Dialog open onOpenChange={(v) => !v && !guardar.isPending && cerrar()}>
       <DialogContent className='max-h-[90svh] overflow-y-auto sm:max-w-lg'>
         <DialogHeader>
           <DialogTitle>
@@ -208,7 +220,28 @@ export function DialogoKey({ existente, cerrar }: Props) {
                   )}
                 </Label>
               ))}
-              {!visibles.length && (
+              {consulta.isLoading && (
+                <p role='status' className='p-1 text-sm text-muted-foreground'>
+                  {t('common.loading')}
+                </p>
+              )}
+              {consulta.isError && (
+                <div
+                  role='alert'
+                  className='flex items-center gap-2 p-1 text-sm'
+                >
+                  {t('agentes.load_error')}
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => consulta.refetch()}
+                  >
+                    {t('agentes.retry')}
+                  </Button>
+                </div>
+              )}
+              {consulta.isSuccess && !visibles.length && (
                 <p className='p-1 text-sm text-muted-foreground'>
                   {t('agentes.form.none_found')}
                 </p>
@@ -217,7 +250,11 @@ export function DialogoKey({ existente, cerrar }: Props) {
           </fieldset>
         </form>
         <DialogFooter>
-          <Button variant='outline' onClick={cerrar}>
+          <Button
+            variant='outline'
+            onClick={cerrar}
+            disabled={guardar.isPending}
+          >
             {t('common.cancel')}
           </Button>
           <Button

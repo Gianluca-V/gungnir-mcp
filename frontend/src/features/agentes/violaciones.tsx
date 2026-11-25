@@ -83,6 +83,7 @@ export function Violaciones() {
                 <span className='text-xs text-muted-foreground'>
                   {t('agentes.violations.reviewed_by', {
                     user: v.revisada_por_nombre ?? '-',
+                    interpolation: { escapeValue: false },
                   })}
                 </span>
               ) : (

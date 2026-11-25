@@ -19,9 +19,15 @@
 const ES_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX32 = (1n << 32n) - 1n;
 const HOST = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9_][a-z0-9_-]{0,62})*$/;
-// "10.0.0.x", "10.0.0-1.1-20", "10.x.x.x": direcciones mal escritas que pasarían por nombres. Con más de
-// cuatro partes sí es un nombre (10.0.0.5.nip.io).
-const DIRECCION_ROTA = /^\d{1,3}(?:-\d{1,3})?\.(?:\d{1,3}(?:-\d{1,3})?\.[^.]+(?:\.[^.]+)?|(?:x{1,3}|n)(?:\.(?:\d{1,3}|x{1,3}|n))*)$/;
+// "10.0.0.x", "10.x.1.1-10", "10.0.0-1.1-20": direcciones mal escritas que pasarían por nombres. Lo son si
+// todas sus partes parecen octetos, o si lo parecen las tres primeras de cuatro. 1.2.acme.com y
+// 168.192.in-addr.arpa sí son nombres.
+const OCTETO = /^(?:\d{1,3}(?:-\d{1,3})?|[nxyz]{1,3}|xn--\d.*)$/;
+function direccionRota(h) {
+  const p = h.split(".");
+  if (p.length < 2 || p.length > 4 || !/^\d/.test(p[0])) return false;
+  return p.every((x) => OCTETO.test(x)) || (p.length === 4 && p.slice(0, 3).every((x) => OCTETO.test(x)));
+}
 const PUERTO_DE_ESQUEMA = {
   http: 80, https: 443, ws: 80, wss: 443, ftp: 21, ftps: 990, ssh: 22, sftp: 22, telnet: 23, smb: 445, rdp: 3389, ldap: 389, ldaps: 636,
   mysql: 3306, postgres: 5432, postgresql: 5432, redis: 6379, mongodb: 27017, vnc: 5900,
@@ -64,7 +70,7 @@ function canonizarHost(crudo) {
   const n4 = ipv4ANumero(canon);
   // 255.255.255.0 y 0.0.0.255 son máscaras, no equipos.
   if (n4 !== null) return n4 >> 24n === 255n || n4 >> 24n === 0n ? null : { ip: { v: 4, n: n4 } };
-  return HOST.test(canon) && !DIRECCION_ROTA.test(canon) ? { host: canon } : null;
+  return HOST.test(canon) && !direccionRota(canon) ? { host: canon } : null;
 }
 
 function rangoCidr(s) {

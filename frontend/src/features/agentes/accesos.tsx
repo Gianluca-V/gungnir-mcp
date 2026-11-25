@@ -29,7 +29,9 @@ import {
   type Nivel,
 } from './comun'
 
-type Cambio = Pick<EngagementAcceso, 'id' | 'nivel_max' | 'mostrar_sensibles'>
+// Solo lo que cambia: una pantalla vieja no puede pisar lo que otra persona acaba de decidir.
+type Cambio = Pick<EngagementAcceso, 'id'> &
+  Partial<Pick<EngagementAcceso, 'nivel_max' | 'mostrar_sensibles'>>
 
 export function Accesos() {
   const { t } = useTranslation()
@@ -58,12 +60,7 @@ export function Accesos() {
   })
 
   function cambiar(e: EngagementAcceso, parte: Partial<Cambio>) {
-    const cambio = {
-      id: e.id,
-      nivel_max: e.nivel_max,
-      mostrar_sensibles: e.mostrar_sensibles,
-      ...parte,
-    }
+    const cambio = { id: e.id, ...parte }
     if (parte.nivel_max === 'total')
       setPorConfirmar({ cual: 'total', titulo: e.title, cambio })
     else if (parte.mostrar_sensibles)

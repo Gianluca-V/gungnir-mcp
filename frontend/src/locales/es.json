@@ -2281,6 +2281,7 @@
       "rejected": "Propuesta rechazada",
       "batch_ok": "{{count}} aprobadas",
       "batch_errors": "{{count}} no se aprobaron: {{error}}",
+      "empty_value": "(vacío)",
       "conflict_title": "El hallazgo cambió",
       "conflict_desc": "Alguien lo modificó después de la propuesta. Si la aprobás, pisa los campos que propone.",
       "force": "Aprobar igual",

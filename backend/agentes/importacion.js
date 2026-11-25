@@ -12,6 +12,7 @@ const { ErrorHttp } = require("./comun");
 
 const FORMATOS = [...Object.keys(PARSERS), "nuclei"];
 const TOPE = 300;
+const TOPE_LECTURA = 20000;
 
 function leer(formato, contenido) {
   let crudos;
@@ -21,6 +22,7 @@ function leer(formato, contenido) {
     throw new ErrorHttp(400, `No se pudo leer el archivo como ${formato}: ${e.message}`);
   }
   crudos = (crudos || []).filter((c) => c && c.title);
+  if (crudos.length > TOPE_LECTURA) throw new ErrorHttp(413, `El archivo trae ${crudos.length} resultados y el tope es ${TOPE_LECTURA}. Dividilo.`);
   if (!crudos.length) throw new ErrorHttp(400, `No se encontraron resultados de ${formato} en el archivo.`);
   return crudos;
 }
@@ -48,10 +50,10 @@ function aHallazgo(c, activo) {
 function clasificar(crudos, items, minima) {
   const aceptados = [], fuera = new Map();
   const evaluar = evaluador(items);
-  let bajoMinimo = 0;
+  let bajoMinimo = 0, sinEquipo = 0;
   for (const c of crudos) {
     const activos = activosDe(c);
-    if (!activos.length) { fuera.set("(sin equipo)", "El resultado no dice a qué equipo corresponde."); continue; }
+    if (!activos.length) { sinEquipo++; continue; }
     // El activo que se guarda es el que está en alcance, con su puerto o su ruta. Alcanza con una forma
     // (URL, IP o nombre), siempre que ninguna esté excluida.
     const r = activos.map((a) => evaluar(a));
@@ -62,7 +64,7 @@ function clasificar(crudos, items, minima) {
     if (SEVERIDADES.indexOf(h.severity) > SEVERIDADES.indexOf(minima)) { bajoMinimo++; continue; }
     aceptados.push(h);
   }
-  return { aceptados, fuera, bajoMinimo };
+  return { aceptados, fuera, bajoMinimo, sinEquipo };
 }
 
 module.exports = { FORMATOS, TOPE, leer, clasificar };

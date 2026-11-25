@@ -16,7 +16,7 @@ const DIAS_MAX = 365;
 
 const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
 
-function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificarHallazgo }) {
+function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar }) {
   const anotar = (req, accion, entidad, id, detalle) =>
     auditLog(req.user.id, req.user.username, accion, entidad, id, detalle, req.ip);
 
@@ -47,7 +47,9 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
               k.creada_en, u.username, k.user_id
        FROM agente_keys k JOIN users u ON u.id=k.user_id ${todas ? "" : "WHERE k.user_id=?"} ORDER BY k.creada_en DESC`,
       todas ? [] : [req.user.id]);
-    const uso = await qRows("SELECT ke.key_id, e.id, e.title FROM agente_key_engagements ke JOIN engagements e ON e.id=ke.engagement_id ORDER BY e.title");
+    const uso = await qRows(
+      `SELECT ke.key_id, e.id, e.title FROM agente_key_engagements ke JOIN engagements e ON e.id=ke.engagement_id
+       JOIN agente_keys k ON k.id=ke.key_id ${todas ? "" : "WHERE k.user_id=?"} ORDER BY e.title`, todas ? [] : [req.user.id]);
     res.json(keys.map((k) => ({
       ...k, vencida: Boolean(k.vencida),
       engagements: uso.filter((x) => x.key_id === k.id).map(({ id, title }) => ({ id, title })),
@@ -108,15 +110,20 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
   }));
 
   app.put("/api/agentes/engagements/:id", auth(["admin", "auditor"]), ruta(async (req, res) => {
-    const nivel = opcion(req.body.nivel_max, "nivel_max", N.NIVELES, { obligatorio: true });
-    if (typeof req.body.mostrar_sensibles !== "boolean") throw new ErrorHttp(400, `"mostrar_sensibles" tiene que ser verdadero o falso.`);
+    // Cada dato se cambia por separado: guardar uno con una pantalla vieja no puede pisar el otro.
+    const nivel = req.body.nivel_max === undefined ? null : opcion(req.body.nivel_max, "nivel_max", N.NIVELES, { obligatorio: true });
+    let sensibles = req.body.mostrar_sensibles;
+    if (sensibles !== undefined && typeof sensibles !== "boolean") throw new ErrorHttp(400, `"mostrar_sensibles" tiene que ser verdadero o falso.`);
+    if (nivel === null && sensibles === undefined) throw new ErrorHttp(400, "No hay nada para cambiar.");
+    // Quitar el acceso vuelve a ocultar: habilitarlo otra vez no muestra datos sin decidirlo de nuevo.
+    if (nivel === "ninguno") sensibles = false;
     const e = await qRow("SELECT id, title FROM engagements WHERE id=?", [req.params.id]);
     if (!e) throw new ErrorHttp(404, "El engagement no existe.");
     await qRun(
-      `INSERT INTO agente_engagements (engagement_id,nivel_max,mostrar_sensibles,actualizado_por) VALUES (?,?,?,?)
-       ON DUPLICATE KEY UPDATE nivel_max=VALUES(nivel_max), mostrar_sensibles=VALUES(mostrar_sensibles), actualizado_por=VALUES(actualizado_por)`,
-      [e.id, nivel, req.body.mostrar_sensibles ? 1 : 0, req.user.id]);
-    await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: nivel ${nivel}, datos sensibles ${req.body.mostrar_sensibles ? "visibles" : "ocultos"}`);
+      `INSERT INTO agente_engagements (engagement_id,nivel_max,mostrar_sensibles,actualizado_por) VALUES (?,COALESCE(?,'ninguno'),COALESCE(?,0),?)
+       ON DUPLICATE KEY UPDATE nivel_max=COALESCE(?,nivel_max), mostrar_sensibles=COALESCE(?,mostrar_sensibles), actualizado_por=VALUES(actualizado_por)`,
+      ((v) => [e.id, nivel, v, req.user.id, nivel, v])(sensibles === undefined ? null : sensibles ? 1 : 0));
+    await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: ${[nivel && `nivel ${nivel}`, sensibles !== undefined && `datos sensibles ${sensibles ? "visibles" : "ocultos"}`].filter(Boolean).join(", ")}`);
     res.json({ ok: true });
   }));
 
@@ -134,7 +141,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       `SELECT p.*, e.title AS engagement_title, u.username AS decidida_por_nombre, f.title AS hallazgo_actual
        FROM agente_propuestas p JOIN engagements e ON e.id=p.engagement_id
        LEFT JOIN users u ON u.id=p.decidida_por LEFT JOIN findings f ON f.id=p.finding_id
-       WHERE p.estado=? ORDER BY p.creada_en DESC LIMIT 500`, [estado]);
+       WHERE p.estado=? ORDER BY p.creada_en DESC LIMIT 100`, [estado]);
     res.json(filas.map((f) => ({ ...f, datos: comoObjeto(f.datos) })));
   }));
 
@@ -164,11 +171,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       return { p, findingId };
     });
     await anotar(req, "agente_propuesta_aprobar", "findings", r.findingId, `Propuesta de la key "${r.p.key_nombre}"`);
-    if (r.p.accion === "crear") {
-      const f = await qRow("SELECT * FROM findings WHERE id=?", [r.findingId]);
-      const e = await qRow("SELECT title AS name FROM engagements WHERE id=?", [r.p.engagement_id]);
-      notificarHallazgo(f, e).catch(() => {});
-    }
+    if (r.p.accion === "crear") notificar(r.findingId, r.p.engagement_id);
     return r.findingId;
   }
 
@@ -180,8 +183,8 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     const aprobadas = [], errores = [];
     for (const id of new Set(ids)) {
       try { await aprobar(req, id, false); aprobadas.push(id); } catch (e) {
-        if (!(e instanceof ErrorHttp)) throw e;
-        errores.push({ id, error: e.message });
+        if (!(e instanceof ErrorHttp)) console.error(`[GUNGNIR] Agentes: propuesta ${id}:`, e.message);
+        errores.push({ id, error: e instanceof ErrorHttp ? e.message : "Error interno al aprobarla." });
       }
     }
     res.json({ aprobadas, errores });

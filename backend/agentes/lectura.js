@@ -18,7 +18,11 @@ const LARGO_COMPLETO = 40000;
 const LARGO_LISTA = 600;
 const ESTADOS_METODOLOGIA = ["pending", "tested", "not_applicable"];
 
-const comoLista = (v) => (Array.isArray(v) ? v : typeof v === "string" && v ? JSON.parse(v) : []);
+/** Lista guardada como JSON. Lo que no se puede leer cuenta como vacío: una fila mala no rompe el listado. */
+function comoLista(v) {
+  if (Array.isArray(v)) return v;
+  try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch { return []; }
+}
 
 function paginar(q) {
   return { limite: entero(q.limite, "limite", { min: 1, max: 100, porDefecto: 25 }), desde: entero(q.desde, "desde", { min: 0, max: 1000000, porDefecto: 0 }) };
@@ -82,7 +86,7 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
   const alcanceDe = (id) => qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [id]);
 
   router.get("/engagements/:id/alcance", con("lectura"), ruta((req, res) => lista(req, res, {
-    sql: "SELECT type, value, in_scope, notes, os_type, ports, pwned FROM scope_items WHERE engagement_id=? ORDER BY in_scope ASC, value",
+    sql: "SELECT type, value, in_scope, notes, os_type, ports, pwned FROM scope_items WHERE engagement_id=? ORDER BY in_scope ASC, value, id",
     params: [req.engagement.id],
     preparar: (s) => ({ ...s, in_scope: Boolean(s.in_scope), pwned: Boolean(s.pwned), ports: comoLista(s.ports) }),
   })));

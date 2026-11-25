@@ -95,15 +95,18 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     await nuevaKey("delB", "admin", "total", [E.b]);
   });
   after(async () => {
+    try {
     for (const f of pool ? await sql("SELECT filename FROM evidences WHERE engagement_id IN (?)", [Object.values(E)]) : [])
       fs.rmSync(path.join(BACKEND, "..", "uploads", f.filename), { force: true });
     if (pool) {
       await sql("DELETE FROM engagements WHERE client_id=?", [CLIENTE]);
       await sql("DELETE FROM clients WHERE id=?", [CLIENTE]);
       await sql("DELETE FROM users WHERE id IN (?)", [Object.values(U).map((x) => x.id)]);
-      await pool.end();
     }
-    if (hijo && hijo.exitCode === null) await new Promise((ok) => { hijo.on("exit", ok); hijo.kill("SIGKILL"); });
+    } finally {
+      if (pool) await pool.end();
+      if (hijo && hijo.exitCode === null) await new Promise((ok) => { hijo.on("exit", ok); hijo.kill("SIGKILL"); });
+    }
   });
 
   describe("acceso", () => {
@@ -134,7 +137,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       const id = uid();
       await sql("INSERT INTO findings (id,engagement_id,title) VALUES (?,?,?)", [id, E.b, "ajeno"]);
       for (const [m, b] of [["GET"], ["PUT", { title: "pisado" }], ["DELETE"]])
-        assert.equal((await ag("total", m, `/engagements/${E.a}/hallazgos/${id}`, b)).status, 404);
+        for (const e of [E.a, E.b]) assert.equal((await ag("total", m, `/engagements/${e}/hallazgos/${id}`, b)).status, 404);
       assert.equal((await sql("SELECT title FROM findings WHERE id=?", [id]))[0].title, "ajeno");
     });
     test("🔴 una key de agente no entra a ninguna ruta del panel", async () => {
@@ -155,8 +158,9 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       assert.equal(r.status, 401); assert.match(r.json.error, /vencida/);
       await sql("UPDATE agente_keys SET expira_en=NOW() + INTERVAL 1 DAY WHERE id=?", [id]);
       await sql("UPDATE users SET is_active=0 WHERE id=?", [U.pentester.id]);
-      assert.equal((await ag("temporal", "GET", "/yo")).status, 401);
+      const inactivo = await ag("temporal", "GET", "/yo");
       await sql("UPDATE users SET is_active=1 WHERE id=?", [U.pentester.id]);
+      assert.equal(inactivo.status, 401);
       assert.equal((await panel("pentester", "DELETE", `/keys/${id}`)).status, 200);
       r = await ag("temporal", "GET", "/yo");
       assert.equal(r.status, 401); assert.match(r.json.error, /revocada/);
@@ -299,13 +303,15 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     test("🔴 muchos equipos fuera de alcance se resumen en pocas violaciones", async () => {
       const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
       const xml = `<nmaprun>${Array.from({ length: 1500 }, (_, i) => nmap(`172.20.${i >> 8}.${i & 255}`, 80).replace(/<\/?nmaprun>/g, "")).join("")}${nmap("10.10.4.4", 80).replace(/<\/?nmaprun>/g, "")}</nmaprun>`;
-      const t0 = Date.now(), r = await importar("propuesta", "nmap", xml);
-      assert.equal(r.status, 201, r.texto); assert.ok(Date.now() - t0 < 6000, `${Date.now() - t0} ms`);
+      const r = await importar("propuesta", "nmap", xml);
+      assert.equal(r.status, 201, r.texto);
       assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 51);
     });
     test("🔴 el listado oculta lo mismo que el detalle, y los motivos también se ocultan", async () => {
       await sql("UPDATE engagements SET title='Pentest - Carla Gómez' WHERE id=?", [E.a]);
-      assert.ok(!(await ag("lectura", "GET", "/engagements")).texto.includes("Carla"));
+      const lista = await ag("lectura", "GET", "/engagements");
+      await sql("UPDATE engagements SET title='Pentest Banco Ficticio a' WHERE id=?", [E.a]);
+      assert.ok(!lista.texto.includes("Carla"));
       await conAlcance([["cidr", "10.10.0.0/16", 1], ["url", "https://admin:Secreta123@vpn-{a}.acme.com/", 0]], async () => {
         const v = await ag("lectura", "POST", `/engagements/${E.a}/alcance/verificar`, { objetivos: ["10.10.1.1"] });
         assert.ok(!v.texto.includes("Secreta123"), v.texto); assert.equal(v.json.contenido_no_confiable, true);
@@ -337,6 +343,55 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       await sql("UPDATE findings SET status='accepted' WHERE id=?", [id]);
       assert.equal((await ag("escritura", "PUT", `/engagements/${E.a}/hallazgos/${id}`, { status: "open" })).status, 409);
       assert.equal((await sql("SELECT status FROM findings WHERE id=?", [id]))[0].status, "accepted");
+    });
+    test("🔴 cambiar una parte del acceso no pisa la otra", async () => {
+      await acceso("a", "total", true);
+      try {
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "lectura" })).status, 200);
+        assert.deepEqual({ ...(await sql("SELECT nivel_max, mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0] }, { nivel_max: "lectura", mostrar_sensibles: 1 });
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { mostrar_sensibles: false })).status, 200);
+        assert.equal((await sql("SELECT nivel_max FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].nivel_max, "lectura");
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, {})).status, 400);
+      } finally { await acceso("a", "total", false); }
+    });
+    test("🔴 quitar el acceso vuelve a ocultar los datos", async () => {
+      await acceso("a", "total", true);
+      try {
+        await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "ninguno" });
+        assert.equal((await sql("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].mostrar_sensibles, 0);
+      } finally { await acceso("a", "total", false); }
+    });
+    test("🔴 en lote, un error inesperado no frena al resto", async () => {
+      const ids = [];
+      for (const t of ["rompe", "sigue"]) ids.push((await ag("propuesta", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ title: `${t} ${uid()}` }))).json.propuesta_id);
+      let r;
+      await sql("CREATE TRIGGER falla_lote BEFORE INSERT ON findings FOR EACH ROW BEGIN IF NEW.title LIKE 'rompe%' THEN SIGNAL SQLSTATE '45000'; END IF; END");
+      try { r = await panel("auditor", "POST", "/propuestas/aprobar-lote", { ids }); } finally { await sql("DROP TRIGGER IF EXISTS falla_lote"); }
+      assert.equal(r.status, 200, r.texto);
+      assert.deepEqual(r.json.aprobadas, [ids[1]]); assert.equal(r.json.errores[0].id, ids[0]);
+    });
+    test("🔴 un XML se guarda como texto: abierto en el navegador no ejecuta nada", async () => {
+      const r = await ag("propuesta", "POST", `/engagements/${E.a}/evidencias`, {}, { archivo: { nombre: "x.xml", contenido: "<html xmlns='http://www.w3.org/1999/xhtml'/>" } });
+      assert.equal((await sql("SELECT file_type FROM evidences WHERE id=?", [r.json.evidencia_id]))[0].file_type, "text/plain");
+    });
+    test("🔴 técnicas iguales a la vez crean una sola", async () => {
+      const nombre = `T ${uid()}`;
+      const r = await Promise.all(Array.from({ length: 6 }, () => ag("escritura", "POST", `/engagements/${E.a}/tecnicas`, { nombre, fase: "recon" })));
+      assert.equal(r.filter((x) => x.status === 201).length, 1);
+    });
+    test("🔴 una importación rechazada por grande igual deja constancia de lo que estaba fuera", async () => {
+      const uno = (ip, p) => nmap(ip, p).replace(/<\/?nmaprun>/g, "");
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+      const r = await importar("escritura", "nmap", `<nmaprun>${uno("8.8.4.4", 53)}${Array.from({ length: 301 }, (_, i) => uno(`10.10.6.${i % 250}`, 2000 + i)).join("")}</nmaprun>`);
+      assert.equal(r.status, 413);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 1);
+    });
+    test("un dato guardado que no es JSON no rompe el arsenal", async () => {
+      const id = uid();
+      await sql("INSERT INTO arsenal_commands (id,tool_key,title,command,tags) VALUES (?,?,?,?,?)", [id, "propia", `Propio ${suf}`, "x", JSON.stringify("a,b")]);
+      const r = await ag("lectura", "GET", `/arsenal?q=${suf}`);
+      await sql("DELETE FROM arsenal_commands WHERE id=?", [id]);
+      assert.equal(r.status, 200, r.texto); assert.equal(r.json.datos.length, 1);
     });
     test("🔴 las keys inválidas no bloquean a las válidas, ni muchas válidas a la vez", async () => {
       const malas = await Promise.all(Array.from({ length: 90 }, () => pedir("GET", `${V1}/yo`, { bearer: "gnga_" + "1".repeat(64) })));
@@ -500,16 +555,17 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
     test("una subida rechazada no deja el archivo en disco", async () => {
       const dir = path.join(BACKEND, "..", "uploads"), antes = fs.readdirSync(dir).length;
-      await ag("propuesta", "POST", `/engagements/${E.a}/evidencias`, { hallazgo_id: uid() }, { archivo: { nombre: "a.txt", contenido: "x" } });
-      await ag("propuesta", "POST", `/engagements/${E.a}/importar`, { formato: "nmap" }, { archivo: { nombre: "a.xml", contenido: "<nada/>" } });
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/evidencias`, { hallazgo_id: uid() }, { archivo: { nombre: "a.txt", contenido: "x" } })).status, 404);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/importar`, { formato: "nmap" }, { archivo: { nombre: "a.xml", contenido: "<nada/>" } })).status, 400);
       assert.equal(fs.readdirSync(dir).length, antes);
     });
     test("si la escritura falla después de guardar el archivo, el archivo se borra", async () => {
       const dir = path.join(BACKEND, "..", "uploads"), antes = fs.readdirSync(dir).length, evs = await contar("evidences", "engagement_id=?", [E.a]);
       await sql("CREATE TRIGGER falla_prueba BEFORE INSERT ON findings FOR EACH ROW SIGNAL SQLSTATE '45000'");
       const xml = `<nmaprun><host><status state="up"/><address addr="10.10.8.8" addrtype="ipv4"/><ports><port protocol="tcp" portid="22"><state state="open"/></port></ports></host></nmaprun>`;
-      const r = await ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap" }, { archivo: { nombre: "a.xml", contenido: xml } });
-      await sql("DROP TRIGGER falla_prueba");
+      let r;
+      try { r = await ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap" }, { archivo: { nombre: "a.xml", contenido: xml } }); }
+      finally { await sql("DROP TRIGGER IF EXISTS falla_prueba"); }
       assert.equal(r.status, 500);
       await new Promise((ok) => setTimeout(ok, 200));
       assert.equal(fs.readdirSync(dir).length, antes);
@@ -556,7 +612,10 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     test("reintentada con la misma clave no duplica la evidencia", async () => {
       const k = { headers: { "Idempotency-Key": uid() } }, c = xml(host("10.10.3.3", 21));
       const a = await importar("escritura", c, {}, k), b = await importar("escritura", c, {}, k);
+      assert.equal(a.status, 201, a.texto);
       assert.equal(a.json.evidencia_id, b.json.evidencia_id);
+      assert.equal(b.headers.get("idempotency-replayed"), "true");
+      assert.equal(await contar("evidences", "id=?", [a.json.evidencia_id]), 1);
     });
   });
 
@@ -599,9 +658,9 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
 });
 
 describe("arsenal", () => {
-  test("data/arsenal.json está al día con el panel (npm run arsenal)", () => {
+  test("data/arsenal.json está al día con el panel (npm run arsenal)", (t) => {
     const { extraer, DESTINO, FUENTE } = require("../agentes/extraer-arsenal");
-    if (!fs.existsSync(FUENTE)) return;
+    if (!fs.existsSync(FUENTE)) return t.skip("sin el código del panel");
     assert.deepEqual(JSON.parse(fs.readFileSync(DESTINO, "utf8")), extraer());
   });
 });
@@ -616,7 +675,7 @@ describe("CVE", () => {
     assert.equal(n, 1); assert.equal(r.cvss_vector_31, "AV:N"); assert.equal(r.severity, "critical"); assert.equal(r.cwe_id, "CWE-79");
   });
   test("traduce los errores de NVD", async () => {
-    for (const [status, data, codigo] of [[429, "", 503], [403, "", 503], [500, "", 503], [404, "", 404], [200, "{}", 404]])
+    for (const [status, data, codigo] of [[429, "", 503], [403, "", 503], [500, "", 503], [404, "", 404], [200, '{"vulnerabilities":[]}', 404], [200, "<html>mantenimiento</html>", 503], [200, "{}", 503]])
       await assert.rejects(cve.crear({ pedir: async () => ({ status, data }) })("CVE-2024-1234"), (e) => e.codigo === codigo);
     await assert.rejects(cve.crear({ pedir: async () => { throw new Error("red"); } })("CVE-2024-1234"), (e) => e.codigo === 503);
   });

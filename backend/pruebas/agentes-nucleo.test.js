@@ -87,7 +87,7 @@ describe("alcance", () => {
   });
   describe("una exclusión mal escrita hace que nada quede dentro", () => {
     for (const x of ["10.0.0.5,6,7", "10.0.0.5 a 10.0.0.20", "10.0.0.5 al 10.0.0.20", "10.0.0.5 - 10.0.0.20", "10.0.0.0/255.255.255.0", "10.0.0.0 255.255.255.0", "10.0.0.0 0.0.0.255", "10.0.0.5:80,443", "10.0.0.5 (DC)", "10.0.0.*",
-      "/admin", "/logout?x=1", "10.0.0.x", "10.x.x.x", "10.0.xx.xx", "10.0.0-1.1-20", "10.0.0.5–20", "10.0.0.5-20:80"])
+      "/admin", "/logout?x=1", "10.0.0.x", "10.x.x.x", "10.0.xx.xx", "10.0.0-1.1-20", "10.x.1.1-10", "10.x.x.1-20", "10.0–3.1.5", "10.0.0.abc", "10.0.0.5–20", "10.0.0.5-20:80"])
       for (const tipo of ["ip", "cidr", "domain", "url"])
         test(`${tipo} ${x}`, () => assert.equal(dentro("10.0.0.10", RED, fuera(tipo, x)), false));
   });
@@ -96,7 +96,7 @@ describe("alcance", () => {
   });
   test("una dirección mal escrita tampoco vale como dominio dentro de alcance", () => {
     for (const x of ["10.0.0.x", "10.0.0-1.1-20", "/admin"]) assert.equal(dentro(x, en("domain", x)), false, x);
-    for (const x of ["10.0.0.5.nip.io", "163.com", "4.3.2.1.in-addr.arpa", "1.lab.acme.com"]) assert.equal(dentro(x, en("domain", x)), true, x);
+    for (const x of ["10.0.0.5.nip.io", "163.com", "4.3.2.1.in-addr.arpa", "1.lab.acme.com", "1.2.acme.com", "168.192.in-addr.arpa"]) assert.equal(dentro(x, en("domain", x)), true, x);
   });
   test("un nombre sin puntos solo vale si va solo", () => {
     assert.equal(dentro("DC01", en("domain", "DC01")), true);

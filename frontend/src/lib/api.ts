@@ -42,7 +42,8 @@ export async function apiFetch<T = unknown>(
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(body.error || `HTTP ${res.status}`)
+    // El resto de la respuesta va en `datos`, para quien necesite algo más que el mensaje.
+    throw Object.assign(new Error(body.error || `HTTP ${res.status}`), { datos: body })
   }
   return res.json() as Promise<T>
 }

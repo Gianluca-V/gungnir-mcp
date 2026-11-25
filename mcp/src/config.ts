@@ -10,7 +10,9 @@ export interface Config {
 }
 
 const FORMATO_KEY = /^gnga_[0-9a-f]{64}$/
-const LOCALES = new Set(['localhost', '127.0.0.1', '[::1]'])
+// host.docker.internal es el equipo donde corre el contenedor: no sale a la red.
+const LOCALES = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal'])
+const FORMATO_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 
 /** Lee la configuración del entorno. Los errores nunca incluyen el valor de la key. */
 export function leerConfig(env: NodeJS.ProcessEnv, carpetaActual: string): Config {
@@ -26,14 +28,17 @@ export function leerConfig(env: NodeJS.ProcessEnv, carpetaActual: string): Confi
   const apiKey = env['GUNGNIR_API_KEY']?.trim() ?? ''
   if (!FORMATO_KEY.test(apiKey)) throw new Error('Falta GUNGNIR_API_KEY o no tiene el formato gnga_... Se crea en el panel, en Integraciones > Agentes.')
 
-  const segundos = Number(env['GUNGNIR_TIEMPO_SEGUNDOS'] ?? 30)
+  const segundos = Number(env['GUNGNIR_TIEMPO_SEGUNDOS']?.trim() || 30)
   if (!Number.isFinite(segundos) || segundos < 1 || segundos > 300) throw new Error('GUNGNIR_TIEMPO_SEGUNDOS tiene que estar entre 1 y 300.')
+
+  const engagement = env['GUNGNIR_ENGAGEMENT']?.trim() || null
+  if (engagement && !FORMATO_ID.test(engagement)) throw new Error('GUNGNIR_ENGAGEMENT tiene que ser el id de un engagement (ver listar_engagements).')
 
   return {
     url: url.origin + url.pathname.replace(/\/+$/, ''),
     apiKey,
     carpeta: path.resolve(env['GUNGNIR_CARPETA']?.trim() || carpetaActual),
-    engagement: env['GUNGNIR_ENGAGEMENT']?.trim() || null,
+    engagement,
     tiempoMs: segundos * 1000,
   }
 }

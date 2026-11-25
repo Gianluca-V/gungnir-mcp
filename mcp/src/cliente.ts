@@ -58,9 +58,13 @@ export function crearCliente(cfg: Config, { pausaMs = 500, fetch: pedirHttp = fe
           texto = await res.text()
         } catch (e) {
           const lento = e instanceof Error && e.name === 'TimeoutError'
+          const causa = e instanceof Error && e.cause instanceof Error ? e.cause.message : ''
+          if (/redirect/i.test(causa)) throw new ErrorGungnir(`${cfg.url} redirige a otra dirección. Poné la definitiva en GUNGNIR_URL (por ejemplo, con https).`)
           ultimo = new ErrorGungnir(lento
             ? `Gungnir no respondió en ${cfg.tiempoMs / 1000} segundos.`
             : `No se pudo conectar con Gungnir en ${cfg.url}. Verificá que esté en marcha.`)
+          // El pedido pudo llegar aunque la respuesta se perdiera: repetirlo con otra clave lo duplicaría.
+          if (metodo !== 'GET' && intento === INTENTOS) ultimo = new ErrorGungnir(`${ultimo.message} El cambio pudo haberse guardado: verificalo antes de repetirlo.`)
           if (intento < INTENTOS) await dormir(pausaMs * intento)
           continue
         }

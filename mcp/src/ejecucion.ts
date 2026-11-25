@@ -11,7 +11,11 @@
  */
 export interface PedidoDeEjecucion {
   herramienta: string
-  /** Lista de argumentos, nunca una línea de comandos: el ejecutor no debe pasar por un shell. */
+  /**
+   * Lista de argumentos, nunca una línea de comandos: el ejecutor no debe pasar por un shell.
+   * El servidor solo verifica `objetivos`: el ejecutor tiene que armar él los objetivos del comando y
+   * rechazar acá cualquier argumento que agregue otros (un host, una URL o un archivo de objetivos).
+   */
   argumentos: string[]
   objetivos: string[]
 }

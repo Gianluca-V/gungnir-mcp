@@ -31,8 +31,11 @@ function crear({ pedir = httpRequest, ahora = Date.now } = {}) {
       r = await pedir(`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${encodeURIComponent(cve)}`, { timeout: 15000, maxRedirects: 0 });
     } catch { throw new ErrorHttp(503, "No se pudo consultar NVD. Reintentá más tarde."); }
     if (r.status === 403 || r.status === 429) throw new ErrorHttp(503, "NVD limitó las consultas. Esperá 30 segundos y reintentá.");
-    const c = r.status === 200 ? parseJSON(r.data)?.vulnerabilities?.[0]?.cve : null;
     if (r.status !== 200 && r.status !== 404) throw new ErrorHttp(503, `NVD respondió ${r.status}.`);
+    const lista = r.status === 200 ? parseJSON(r.data)?.vulnerabilities : [];
+    // Una página de mantenimiento también llega con 200: no es lo mismo que "no existe".
+    if (!Array.isArray(lista)) throw new ErrorHttp(503, "NVD respondió algo que no se pudo leer. Reintentá más tarde.");
+    const c = lista[0]?.cve;
     if (!c) throw new ErrorHttp(404, `${cve} no está en NVD.`);
     const datos = resumir(cve, c);
     if (memoria.size >= TOPE) memoria.delete(memoria.keys().next().value);

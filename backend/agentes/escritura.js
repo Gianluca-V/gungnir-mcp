@@ -18,11 +18,11 @@ const { ErrorHttp, ruta, texto, opcion } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
 // El tipo sale de la extensión, no de lo que declara quien sube. Sin HTML ni SVG: ejecutan código
-// al abrirse.
+// al abrirse. Un XML también puede traerlos adentro, así que se guarda como texto.
 const TIPOS = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
   ".pdf": "application/pdf", ".txt": "text/plain", ".log": "text/plain", ".md": "text/plain", ".csv": "text/csv",
-  ".xml": "application/xml", ".nessus": "application/xml", ".json": "application/json", ".jsonl": "text/plain", ".zip": "application/zip",
+  ".xml": "text/plain", ".nessus": "text/plain", ".json": "application/json", ".jsonl": "text/plain", ".zip": "application/zip",
 };
 const MB = 1024 * 1024;
 const VENTANA_EN_CURSO_MIN = 10;
@@ -73,18 +73,26 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     } catch (e) {
       // La transacción se deshizo: los archivos que alcanzó a guardar no quedan sueltos.
       for (const a of req.archivosEscritos || []) await fs.promises.unlink(path.join(carpeta, a)).catch(() => {});
-      if (clave) await qRun("DELETE FROM agente_idempotencia WHERE key_id=? AND clave=? AND lista=0", [req.agente.keyId, clave]);
       req.violaciones = [];
-      // Lo rechazado por alcance deja constancia aunque el pedido se haya deshecho.
-      if (e.violacion) await violacion({ qRun }, req, e.violacion);
-      await anotarViolaciones(req);
+      await sinFallar("registrar lo rechazado", async () => {
+        // Lo rechazado por alcance deja constancia aunque el pedido se haya deshecho.
+        for (const v of e.violaciones || []) await violacion({ qRun }, req, v);
+        await anotarViolaciones(req);
+      });
+      if (clave) await sinFallar("liberar la clave", () => qRun("DELETE FROM agente_idempotencia WHERE key_id=? AND clave=? AND lista=0", [req.agente.keyId, clave]));
       throw e;
     }
-    await anotarViolaciones(req);
-    if (r.despues) await r.despues();
+    // Ya está guardado: lo que falle desde acá no cambia la respuesta, o el agente repetiría el pedido.
+    await sinFallar("auditar", async () => {
+      await anotarViolaciones(req);
+      if (r.despues) await r.despues();
+    });
     res.status(r.codigo).json(r.cuerpo);
   });
 
+  async function sinFallar(que, fn) {
+    try { await fn(); } catch (e) { console.error(`[GUNGNIR] Agentes: no se pudo ${que}:`, e.message); }
+  }
   async function anotarViolaciones(req) {
     for (const v of req.violaciones || []) await anotar(req, "fuera_de_alcance", "engagements", req.engagement.id, v);
   }
@@ -128,7 +136,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     const a = evaluar(activo, await alcanceDe(tx, req.engagement.id));
     if (a.dentro) return;
     const e = new ErrorHttp(422, `El hallazgo se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "affected_asset" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
-    e.violacion = { tipo: "hallazgo", objetivo: activo, motivo: a.motivo };
+    e.violaciones = [{ tipo: "hallazgo", objetivo: activo, motivo: a.motivo }];
     throw e;
   };
 
@@ -190,8 +198,9 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     await tx.qRun(
       "INSERT INTO evidences (id,engagement_id,finding_id,phase_type,filename,original_name,file_type,file_size,caption,uploaded_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
       [id, req.engagement.id, hallazgoId, fase, archivo, nombre, tipo, req.file.size, descripcion, req.agente.userId]);
-    await fs.promises.writeFile(path.join(carpeta, archivo), req.file.buffer, { flag: "wx" });
+    // Se anota antes de escribir: si se corta a la mitad, también hay que borrarlo.
     req.archivosEscritos = [...(req.archivosEscritos || []), archivo];
+    await fs.promises.writeFile(path.join(carpeta, archivo), req.file.buffer, { flag: "wx" });
     return { id, nombre };
   }
 
@@ -211,7 +220,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     if (!ev) throw new ErrorHttp(404, "La evidencia no existe en este engagement.");
     await tx.qRun("DELETE FROM evidences WHERE id=?", [ev.id]);
     return { codigo: 200, cuerpo: { borrado: ev.id }, despues: async () => {
-      await fs.promises.unlink(path.join(carpeta, path.basename(ev.filename))).catch(() => {});
+      await sinFallar(`borrar el archivo de la evidencia ${ev.id}`, () => fs.promises.unlink(path.join(carpeta, path.basename(ev.filename))));
       await anotar(req, "evidencia_borrar", "evidences", ev.id, ev.original_name);
     } };
   }));
@@ -225,9 +234,15 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     const leidos = importacion.leer(formato, req.file.buffer.toString("utf8"));
     await enFila(tx, req.engagement.id);
     const items = await alcanceDe(tx, req.engagement.id);
-    const { aceptados, fuera, bajoMinimo } = importacion.clasificar(leidos, items, minima);
-    if (aceptados.length > importacion.TOPE)
-      throw new ErrorHttp(413, `El archivo trae ${aceptados.length} hallazgos y el tope es ${importacion.TOPE}. Subí "severidad_minima" o dividí el archivo.`);
+    const { aceptados, fuera, bajoMinimo, sinEquipo } = importacion.clasificar(leidos, items, minima);
+    const fueraDeAlcance = [...fuera].slice(0, TOPE_VIOLACIONES).map(([objetivo, motivo]) => ({ tipo: "importacion", objetivo, motivo }));
+    if (fuera.size > TOPE_VIOLACIONES)
+      fueraDeAlcance.push({ tipo: "importacion", objetivo: `${fuera.size - TOPE_VIOLACIONES} equipos más`, motivo: `El archivo trae ${fuera.size} equipos fuera de alcance.` });
+    if (aceptados.length > importacion.TOPE) {
+      const e = new ErrorHttp(413, `El archivo trae ${aceptados.length} hallazgos y el tope es ${importacion.TOPE}. Subí "severidad_minima" o dividí el archivo.`);
+      e.violaciones = fueraDeAlcance;
+      throw e;
+    }
 
     // El original queda como evidencia: en la respuesta va solo el resumen.
     const ev = await guardarArchivo(req, tx, { fase, descripcion: `Escaneo importado (${formato})` });
@@ -242,22 +257,18 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
         : await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "crear", datos });
       creados.push({ id, title: datos.title, severity: datos.severity, affected_asset: datos.affected_asset });
     }
-    for (const [objetivo, motivo] of [...fuera].slice(0, TOPE_VIOLACIONES)) await violacion(tx, req, { tipo: "importacion", objetivo, motivo });
-    if (fuera.size > TOPE_VIOLACIONES)
-      await violacion(tx, req, { tipo: "importacion", objetivo: `${fuera.size - TOPE_VIOLACIONES} equipos más`, motivo: `El archivo "${ev.nombre}" trae ${fuera.size} equipos fuera de alcance. El detalle está en la evidencia.` });
+    for (const v of fueraDeAlcance) await violacion(tx, req, v);
     const porSeveridad = Object.fromEntries(H.SEVERIDADES.map((s) => [s, creados.filter((c) => c.severity === s).length]).filter(([, n]) => n));
     return {
       codigo: 201,
       cuerpo: {
         evidencia_id: ev.id, leidos: leidos.length, [directo ? "hallazgos_creados" : "propuestas_creadas"]: creados.length,
-        duplicados, bajo_severidad_minima: bajoMinimo, hosts_fuera_de_alcance: [...fuera.keys()].slice(0, 20), por_severidad: porSeveridad,
+        duplicados, bajo_severidad_minima: bajoMinimo, sin_equipo: sinEquipo, hosts_fuera_de_alcance: [...fuera.keys()].slice(0, 20), por_severidad: porSeveridad,
         muestra: req.ocultar.objeto(creados.slice(0, 15)), contenido_no_confiable: true,
         ...(fuera.size ? { alerta: `Se ignoraron resultados de ${fuera.size} host(s) fuera de alcance y quedó registrada la violación.` } : {}),
       },
-      despues: async () => {
-        await anotar(req, "importar", "findings", req.engagement.id, `${formato}: ${creados.length} de ${leidos.length}`);
-        if (directo) for (const c of creados) await notificar(c.id, req.engagement.titulo);
-      },
+      // Sin avisos por hallazgo, igual que la importación del panel: un escaneo mandaría cientos.
+      despues: () => anotar(req, "importar", "findings", req.engagement.id, `${formato}: ${creados.length} de ${leidos.length}`),
     };
   }));
 
@@ -283,6 +294,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
       tactic: texto(b.tactica, "tactica", { max: 100 }), tool: texto(b.herramienta, "herramienta", { max: 200 }),
       notes: texto(b.notas, "notas", { max: 5000 }), phase_type: opcion(b.fase, "fase", H.FASES),
     };
+    await enFila(tx, req.engagement.id);
     const ya = await tx.qRow("SELECT id FROM engagement_techniques WHERE engagement_id=? AND name=? AND mitre_id<=>? AND phase_type<=>?", [req.engagement.id, d.name, d.mitre_id, d.phase_type]);
     if (ya) throw new ErrorHttp(409, "Esa técnica ya está registrada en la fase.", { existente: ya.id });
     const id = uuidv4();

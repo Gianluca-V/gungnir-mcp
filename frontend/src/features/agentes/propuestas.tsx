@@ -23,12 +23,11 @@ import {
   type Propuesta,
 } from './comun'
 
-const texto = (v: unknown) =>
-  Array.isArray(v)
-    ? v.join('\n')
-    : v === null || v === undefined
-      ? ''
-      : String(v)
+function texto(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (Array.isArray(v)) return v.map(texto).join('\n')
+  return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
 
 export function Propuestas() {
   const { t } = useTranslation()
@@ -60,9 +59,11 @@ export function Propuestas() {
       setConflicto(null)
       toast.success(t('agentes.proposals.approved'))
     },
-    onError: (e: Error, { p, forzar }) => {
-      // apiFetch solo entrega el mensaje del error, no el código.
-      if (!forzar && e.message.startsWith('El hallazgo cambió')) setConflicto(p)
+    onError: (
+      e: Error & { datos?: { conflicto?: boolean } },
+      { p, forzar }
+    ) => {
+      if (!forzar && e.datos?.conflicto) setConflicto(p)
       else toast.error(e.message)
     },
     onSettled: alTerminar,
@@ -97,14 +98,17 @@ export function Propuestas() {
         method: 'POST',
         body: { motivo },
       }),
-    onSuccess: () => toast.success(t('agentes.proposals.rejected')),
-    onError: (e: Error) => toast.error(e.message),
-    onSettled: () => {
-      setARechazar(null)
-      setMotivo('')
-      alTerminar()
+    onSuccess: () => {
+      cerrarRechazo()
+      toast.success(t('agentes.proposals.rejected'))
     },
+    onError: (e: Error) => toast.error(e.message),
+    onSettled: alTerminar,
   })
+  function cerrarRechazo() {
+    setARechazar(null)
+    setMotivo('')
+  }
   const ocupado = aprobar.isPending || lote.isPending || rechazar.isPending
 
   function alternar(id: string, v: boolean) {
@@ -153,9 +157,7 @@ export function Propuestas() {
               <Button
                 size='sm'
                 disabled={ocupado}
-                onClick={() =>
-                  lote.mutate(vigentes.slice(0, 300).map((p) => p.id))
-                }
+                onClick={() => lote.mutate(vigentes.map((p) => p.id))}
               >
                 {t('agentes.proposals.approve_selected', {
                   count: vigentes.length,
@@ -249,10 +251,8 @@ export function Propuestas() {
                     <dl className='mt-3 space-y-3'>
                       {Object.entries(p.datos)
                         .filter(
-                          ([k, v]) =>
-                            !['title', 'affected_asset', 'severity'].includes(
-                              k
-                            ) && texto(v)
+                          ([k]) =>
+                            !['title', 'affected_asset', 'severity'].includes(k)
                         )
                         .map(([k, v]) => (
                           <div key={k}>
@@ -260,7 +260,11 @@ export function Propuestas() {
                               {k}
                             </dt>
                             <dd className='max-h-64 max-w-[75ch] overflow-y-auto text-sm break-words whitespace-pre-wrap'>
-                              {texto(v)}
+                              {texto(v) || (
+                                <em className='text-muted-foreground'>
+                                  {t('agentes.proposals.empty_value')}
+                                </em>
+                              )}
                             </dd>
                           </div>
                         ))}
@@ -287,7 +291,7 @@ export function Propuestas() {
       />
       <ConfirmDialog
         open={!!aRechazar}
-        onOpenChange={(v) => !v && setARechazar(null)}
+        onOpenChange={(v) => !v && cerrarRechazo()}
         title={t('agentes.proposals.reject_title')}
         desc={texto(aRechazar?.datos.title) || aRechazar?.hallazgo_actual || ''}
         confirmText={t('agentes.proposals.reject')}

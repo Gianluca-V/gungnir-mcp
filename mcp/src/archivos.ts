@@ -1,4 +1,4 @@
-import { open, realpath } from 'node:fs/promises'
+import { open, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { Archivo } from './cliente.ts'
 import { ErrorGungnir } from './cliente.ts'
@@ -25,6 +25,8 @@ export async function leerArchivo(carpeta: string, ruta: string): Promise<Archiv
   if (!estaDentro(raiz, real)) throw new ErrorGungnir('El archivo está fuera de la carpeta de trabajo (GUNGNIR_CARPETA).')
   if (relativa.split(path.sep).some((p) => p.startsWith('.'))) throw new ErrorGungnir('Los archivos y carpetas ocultos no se pueden subir.')
 
+  // Antes de abrir: una tubería con nombre dejaría la lectura esperando para siempre.
+  if (!(await stat(real)).isFile()) throw new ErrorGungnir('La ruta no es un archivo.')
   const f = await open(real, 'r')
   try {
     const datos = await f.stat()

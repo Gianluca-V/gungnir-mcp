@@ -63,6 +63,7 @@ async function crearTablas({ qRun }) {
     decidida_en DATETIME NULL,
     creada_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_estado (engagement_id, estado),
+    INDEX idx_recientes (estado, creada_en),
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 

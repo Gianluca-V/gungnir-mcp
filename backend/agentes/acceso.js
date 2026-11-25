@@ -39,6 +39,11 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
     windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
     message: { error: "Demasiados intentos con una key inválida. Reintentá en 15 minutos." },
   });
+  // Techo por dirección, antes de mirar la key: acota lo que cuesta rechazar pedidos sin autenticar.
+  const limitePorIp = rateLimit({
+    windowMs: 15 * 60 * 1000, max: limitePorVentana * 4, standardHeaders: false, legacyHeaders: false,
+    message: { error: "Demasiados pedidos desde esta dirección. Reintentá en unos minutos." },
+  });
   // Límite propio por key: un agente no agota el cupo del panel ni el de otra key.
   const limitePorKey = rateLimit({
     windowMs: 15 * 60 * 1000, max: limitePorVentana, standardHeaders: true, legacyHeaders: false,
@@ -65,7 +70,8 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
       keyId: k.id, keyNombre: k.nombre, userId: k.user_id, username: k.username, rol: k.role,
       nivelMax: N.efectivo(k.nivel_max, N.techoDeRol(k.role)),
     };
-    if (k.anotar_uso) await qRun("UPDATE agente_keys SET ultimo_uso=NOW() WHERE id=?", [k.id]);
+    // Es un dato informativo: que falle o espere un bloqueo no puede frenar el pedido.
+    if (k.anotar_uso) qRun("UPDATE agente_keys SET ultimo_uso=NOW() WHERE id=?", [k.id]).catch(() => {});
     next();
   });
 
@@ -96,7 +102,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
 
   const ocultador = (opciones) => O.crear({ secreto: secretoBase, ...opciones });
 
-  return { limitePorKey, autenticar, conEngagement, ocultador };
+  return { limitePorIp, limitePorKey, autenticar, conEngagement, ocultador };
 }
 
 module.exports = { crear, nuevaKey, hashDeKey, CAMPOS_CLIENTE, nombresDe };

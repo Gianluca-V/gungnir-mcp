@@ -2281,6 +2281,7 @@
       "rejected": "Proposal rejected",
       "batch_ok": "{{count}} approved",
       "batch_errors": "{{count}} not approved: {{error}}",
+      "empty_value": "(empty)",
       "conflict_title": "The finding changed",
       "conflict_desc": "Someone edited it after the proposal. Approving overwrites the proposed fields.",
       "force": "Approve anyway",

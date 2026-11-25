@@ -92,7 +92,7 @@ export function Keys() {
                       <div className='text-xs text-muted-foreground'>
                         <span className='font-mono'>{k.prefijo}…</span>
                         {k.user_id !== miId &&
-                          ` ${t('agentes.keys.owner', { user: k.username })}`}
+                          ` ${t('agentes.keys.owner', { user: k.username, interpolation: { escapeValue: false } })}`}
                       </div>
                     </TableCell>
                     <TableCell>

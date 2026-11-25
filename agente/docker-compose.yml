@@ -15,8 +15,8 @@ services:
       GUNGNIR_URL: ${GUNGNIR_URL:-http://host.docker.internal:3006}
       GUNGNIR_API_KEY: ${GUNGNIR_API_KEY:?Falta GUNGNIR_API_KEY. Se crea en el panel, en Integraciones > Agentes}
       GUNGNIR_ENGAGEMENT: ${GUNGNIR_ENGAGEMENT:-}
-      # El tráfico hacia host.docker.internal no sale del equipo. Con una URL https no hace falta.
-      GUNGNIR_PERMITIR_HTTP: ${GUNGNIR_PERMITIR_HTTP:-1}
+      # http solo se admite hacia el equipo anfitrión. Hacia otro equipo hay que pedirlo.
+      GUNGNIR_PERMITIR_HTTP: ${GUNGNIR_PERMITIR_HTTP:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"

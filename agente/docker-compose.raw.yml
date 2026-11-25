@@ -3,6 +3,9 @@
 #
 # El agente corre como root del contenedor. DAC_OVERRIDE le deja escribir en las carpetas del usuario
 # 1000. Sin este archivo, nmap usa conexiones completas (-sT).
+#
+# En Linux, lo que escriba en la carpeta de trabajo queda a nombre de root: no ejecutes fuera del
+# contenedor nada de lo que deje ahí, y usalo solo mientras haga falta.
 services:
   agente:
     user: root

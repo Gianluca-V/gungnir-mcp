@@ -22,8 +22,21 @@ Hace falta Node 22.18 o posterior.
 
 ### Claude Code
 
-```bash
-claude mcp add gungnir -s user -e GUNGNIR_URL=http://localhost:3006 -e GUNGNIR_API_KEY=gnga_... -e GUNGNIR_CARPETA=/ruta/a/tu/trabajo -- node /ruta/completa/a/mcp/dist/index.js
+En `.mcp.json`, en la carpeta donde trabajás, con la key en una variable de entorno:
+
+```json
+{
+  "mcpServers": {
+    "gungnir": {
+      "command": "node",
+      "args": ["/ruta/completa/a/mcp/dist/index.js"],
+      "env": {
+        "GUNGNIR_URL": "http://localhost:3006",
+        "GUNGNIR_API_KEY": "${GUNGNIR_API_KEY}"
+      }
+    }
+  }
+}
 ```
 
 Verificá con `claude mcp list`.
