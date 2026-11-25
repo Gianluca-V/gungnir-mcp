@@ -314,7 +314,9 @@ describe("el activo que ya tiene un hallazgo", () => {
     for (const a of ["10.10.9.9", "ssh://10.10.9.9", "10.10.9.9/admin", "10.10.9.9:22/tcp", "10.10.0.0/16", "web.cliente.test/app/admin", "pagos.sub.cliente.test/login", "intranet", "intranet/x", "Portal Pagos", "Portal 10.10.9.9",
       "10.0.0.5", "10.0.0.5/admin", "10.0.0.5:8443/login", "10.0.0.5-20", "8.8.0.0/24", "evil.test", "evil.test.", "evil.test/login", "evil.test:8443/login", "https://evil.test/x", "https://u:p@evil.test/", "ftp://evil.test", "ssh://evil.test",
       "smb://10.0.0.5/c$", "evil.sh", "evil.py", "evil.rs", "xn--bcher-kva.example", "bücher.example", "[2001:db8::9]:443", "2001:db8::9", "srv (8.8.8.8) 443/tcp", "srv-web[10.0.0.5]", "host=10.0.0.5", "{10.0.0.5}", "a|10.0.0.5", "evil.test:", "10.0.0.5:",
-      "evil.test (prod)", "10.10.1.1, 8.8.8.8", "10.10.1.1 y evil.test", "\"evil.test\"", "<https://evil.test/a>", "evil.test/a src/db.js"])
+      "evil.test (prod)", "10.10.1.1, 8.8.8.8", "10.10.1.1 y evil.test", "\"evil.test\"", "<https://evil.test/a>", "evil.test/a src/db.js",
+      "https://jenkins:8080/login", "http://intranet2/x", "http://localhost:8080/", "ssh://srv-db", "jenkins:8080/tcp", "10.0.0.5,https://app.cliente.test/", "evil.test;https://app.cliente.test/", "https://app.cliente.test/ http://intranet2/",
+      "evil.test/login srv:443", "evil.test!", "//evil.test/x", "*.evil.test", "evil.test→10.10.0.1", "evil.test / cliente.test", "http://[2001:db8::9]", "(http://[2001:db8::9])", "https://[2001:db8::9], 10.10.1.1", "[http://evil.test]", "raro://jenkins", "github.com/admin", "ssh://github.com/org/app", "https://github.com:8443/a/b", "evil.test/a b.test:443", "evil.test/a b.test/x:443", "evil.test/a 10.0.0.5/x:443", "evil.test src/db.js:42", "10.0.0.5 src/db.js:42"])
       test(a, () => assert.equal(pasa(a), false));
   });
   describe("🔴 lo que está dentro sigue editable, aunque nombre otra cosa en la URL", () => {
@@ -324,7 +326,8 @@ describe("el activo que ya tiene un hallazgo", () => {
   });
   describe("🔴 una etiqueta de una persona o del seguimiento no se juzga, con o sin alcance", () => {
     for (const a of ["", null, "Tablero", "Aplicación web", "N/A", "Dockerfile", "src/db.js:42", "org/app", "github.com/org/app src/db.js:42", "github.com/org/app", "gitlab.otro.test/org/app src/db.js:42", "srv-web", "s3://balde", "server.js",
-      "web.config", "index.aspx", "log4j-core-2.14.1.jar", "package.json", "v1.2.3", "registry/app:1.2", "alpine:3.18"])
+      "web.config", "index.aspx", "log4j-core-2.14.1.jar", "package.json", "v1.2.3", "registry/app:1.2", "alpine:3.18",
+      "nginx:1.25", "Dockerfile:12", "https://github.com/org/app", "https://github.com/org/app src/db.js:42", "gitlab.otro.test/org/app main.py:7", "docker://imagen", "gs://balde/x"])
       test(String(a), () => { assert.equal(pasa(a), true); assert.equal(pasa(a, []), true); });
   });
   test("🔴 con una exclusión ilegible nada es editable", () => {

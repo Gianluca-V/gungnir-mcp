@@ -243,25 +243,45 @@ function evaluarPreparado(objetivo, si, no) {
 // Con punto y todo, son archivos y no equipos. Solo extensiones que no son dominios de primer nivel.
 const ARCHIVO = /\.(?:jsx?|tsx?|mjs|cjs|rb|php|java|go|cs|c|h|cpp|ps1|sql|json|ya?ml|xml|html?|css|txt|lock|toml|ini|conf|cfg|config|env|gradle|jar|war|dll|exe|aspx?|jsp|bak|log|csv|pem|crt)$/i;
 const FORJA = /^(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|dev\.azure\.com)$/;
-const ARCHIVO_Y_LINEA = /(?:^|\s)\S+:\d+$/;
+// Esquemas que nombran un recurso y no un equipo: "s3://balde".
+const DE_ETIQUETA = new Set(["s3", "gs", "azblob", "docker", "oci", "npm", "pkg", "arn", "urn", "file"]);
 const conPunto = (h) => h.includes(".") && /\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/.test(h) && !ARCHIVO.test(h);
 
-/** Si un pedazo de texto nombra sin dudas un equipo: una dirección, un nombre con punto o una URL hacia ellos. */
+const CODIGO = /\.(?:jsx?|tsx?|mjs|cjs|py|rb|php|java|go|rs|cs|c|h|cpp|sh|ps1|sql|json|ya?ml|xml|html?|css|md|toml|tf|gradle)$/i;
+/** El "archivo:línea" con que termina un hallazgo de código ("github.com/org/app src/db.js:42"), o null. */
+function archivoYLinea(activo) {
+  const ultimo = /\s(\S+):\d+$/.exec(activo)?.[1];
+  if (!ultimo) return null;
+  const [raiz, ...resto] = ultimo.split("/");
+  const x = leer(raiz);
+  const esEquipo = x && (tieneIp(x) || conPunto(x.host));
+  return (resto.length ? !esEquipo : CODIGO.test(ultimo)) ? ultimo : null;
+}
+
+/** Si un pedazo de texto nombra sin dudas un equipo: una dirección, un nombre con punto, o uno con esquema o protocolo de red. */
 function esClaro(p, { repositorio }) {
   const t = leer(p);
   if (!t) return false;
   if (tieneIp(t)) return true;
-  if (!conPunto(t.host)) return false;
   // "github.com/org/app" o "gitlab.x.com/org/app src/db.js:42" son repositorios.
-  return !(t.clase === "url" && !t.esquema && (FORJA.test(t.host) || repositorio));
+  const web = !t.esquema || t.esquema === "http" || t.esquema === "https";
+  if (t.clase === "url" && !t.puertoExplicito && /^\/[^/]+\/[^/]/.test(t.ruta) && ((FORJA.test(t.host) && web) || (repositorio && !t.esquema))) return false;
+  if ((t.esquema && !DE_ETIQUETA.has(t.esquema)) || /:\d+\/(?:tcp|udp|sctp)$/i.test(p)) return true;
+  return conPunto(t.host);
+}
+/** Una URL sin la puntuación que la rodeaba. El corchete de una IPv6 se queda. */
+function sinCierre(u) {
+  const x = u.replace(/[)>\]}"',;.!]+$/, "");
+  return u[x.length] === "]" && x.lastIndexOf("[") > x.lastIndexOf("]") ? `${x}]` : x;
 }
 /** Los pedazos de un texto. Una URL va entera; del resto se saca la puntuación que suele rodear a un equipo. */
 function pedazos(texto) {
+  const sueltos = (p) => p.split(/[,;()"'<>{}[\]|=!→*]+/).map((x) => x.replace(/^[./]+|[:.]+$/g, ""));
   return String(texto).split(/\s+/).flatMap((p) => {
-    const url = /[a-z][a-z0-9+.-]*:\/\/\S+/i.exec(p)?.[0];
-    if (url) return [url.replace(/[)>\]}"',;.]+$/, "")];
+    const url = /[a-z][a-z0-9+.-]*:\/\/\S+/i.exec(p);
+    if (url) return [...sueltos(p.slice(0, url.index)), sinCierre(url[0])];
     if (/^\[[0-9a-f:.]+\](?::\d+)?(?:\/\w+)?$/i.test(p)) return [p];
-    return p.split(/[,;()"'<>{}[\]|=]+/).map((x) => x.replace(/[:.]+$/, ""));
+    return sueltos(p);
   }).filter(Boolean);
 }
 /**
@@ -275,8 +295,8 @@ function juzgarActivo(texto, evaluar) {
   const r = evaluar(activo);
   if (r.dentro) return null;
   if (r.excluido || r.exclusionIlegible) return { objetivo: activo, motivo: r.motivo };
-  const repositorio = ARCHIVO_Y_LINEA.test(activo) && /\s/.test(activo);
-  for (const p of pedazos(activo)) {
+  const archivo = archivoYLinea(activo), repositorio = archivo !== null;
+  for (const p of pedazos(repositorio ? activo.slice(0, activo.lastIndexOf(archivo)) : activo)) {
     if (!esClaro(p, { repositorio })) continue;
     const x = evaluar(p);
     if (!x.dentro) return { objetivo: p, motivo: x.motivo };
