@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test pruebas/*.test.js"
+    "test": "node --test pruebas/*.test.js",
+    "arsenal": "node agentes/extraer-arsenal.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",

@@ -28,6 +28,7 @@ const notificaciones = require("./notificaciones");
 const { CATALOGOS: METODOLOGIAS } = require("./data/metodologias");
 const inventarioCommunity = require("./inventario-community");
 const vulnerabilidades    = require("./vulnerabilidades");
+const agentes             = require("./agentes");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -146,7 +147,7 @@ app.set('trust proxy', TRUST_PROXY === "false" ? false : /^\d+$/.test(TRUST_PROX
 // 1.5.2: el límite general era de 200 pedidos y se aplicaba a todo, también a los archivos del panel que sirve este
 // mismo proceso. Con abrir unas cinco pantallas se gastaba y el panel quedaba en "Too many requests" 15 minutos.
 // Ahora, como en Gungnir Pro: 1000 pedidos de API cada 15 minutos y, aparte, 30 intentos de inicio de sesión.
-const limiter = rateLimit({ windowMs: 15*60*1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({ windowMs: 15*60*1000, max: 1000, standardHeaders: true, legacyHeaders: false, skip: agentes.esPedidoDeAgente });
 app.use("/api/", limiter);
 const loginLimiter = rateLimit({ windowMs: 15*60*1000, max: 30, standardHeaders: true, legacyHeaders: false,
   message: { error: "Demasiados intentos de inicio de sesión. Intentá en 15 minutos." } });
@@ -979,6 +980,9 @@ async function initDB() {
     await inventarioCommunity.prepararEsquema({ qRows, qRun });
     await vulnerabilidades.crearTablasCompletas({ qRows, qRun });
   } catch (e) { console.error("[GUNGNIR] Inventario y vulnerabilidades: no se pudieron crear las tablas:", e.message); }
+
+  try { await agentes.crearTablas({ qRun }); }
+  catch (e) { console.error("[GUNGNIR] Agentes: no se pudieron crear las tablas:", e.message); }
 
   console.log("[GUNGNIR] DB inicializada correctamente.");
 }
@@ -2646,6 +2650,10 @@ inventarioCommunity.montar(app, { auth, auditLog, qRow, qRows, qRun, alFusionar:
 // cierre y reapertura), con prioridad por EPSS y KEV (descarga diaria) y plazos por severidad. Vive en
 // vulnerabilidades.js. Los conectores programados y la API para CI/CD son de Gungnir Pro.
 const vulnerabilidadesApi = vulnerabilidades.montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion });
+
+// Agentes (opencode, Claude Code) por medio del servidor MCP de mcp/: sus keys solo valen en
+// /api/agente/v1. Las keys, los niveles y las propuestas se administran en /api/agentes.
+agentes.montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificarHallazgo, secretoBase: JWT_SECRET, carpeta: UPLOADS_DIR });
 
 // ── API KEYS ──────────────────────────────────────────────────────────────────
 const crypto = require("crypto");

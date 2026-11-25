@@ -179,14 +179,14 @@ function evaluar(objetivo, items) {
   const texto = String(objetivo ?? "").trim();
   if (!texto) return { dentro: false, motivo: "No se indicó un objetivo." };
   const si = preparar(items, true), no = preparar(items, false);
-  if (no.libres.has(normal(texto))) return { dentro: false, motivo: `"${texto}" está excluido del alcance.` };
+  if (no.libres.has(normal(texto))) return { dentro: false, excluido: true, motivo: `"${texto}" está excluido del alcance.` };
   if (no.ilegible) return { dentro: false, motivo: `No se puede interpretar la exclusión "${no.ilegible}": hay que corregirla en el alcance.` };
   if (si.libres.has(normal(texto))) return { dentro: true, motivo: null };
   if (!si.red.length && !si.libres.size) return { dentro: false, motivo: "El engagement no tiene objetivos dentro de alcance." };
   for (const parte of partir(texto)) {
     const t = leer(parte);
     if (!t) return { dentro: false, motivo: `No se puede interpretar el objetivo "${parte}".` };
-    if (no.red.some((e) => toca(e, t))) return { dentro: false, motivo: `"${parte}" está excluido del alcance.` };
+    if (no.red.some((e) => toca(e, t))) return { dentro: false, excluido: true, motivo: `"${parte}" está excluido del alcance.` };
     if (!si.red.some((e) => cubre(e, t))) return { dentro: false, motivo: `"${parte}" no está en el alcance.` };
   }
   return { dentro: true, motivo: null };
