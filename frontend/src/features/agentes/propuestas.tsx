@@ -59,14 +59,18 @@ export function Propuestas() {
   // Lo que ya se decidió en otro lado deja de contar como elegido.
   const vigentes = filas.filter((p) => elegidas.has(p.id))
 
+  // En el mapa no se pisa lo que ya había: quien aprueba tiene que saberlo.
+  const avisarConservados = (n = 0) =>
+    n > 0 && toast.info(t('agentes.map.conserved', { count: n }))
   const alTerminar = () => qc.invalidateQueries({ queryKey: ['agentes'] })
   const aprobar = useMutation({
     mutationFn: ({ p, datos, forzar }: Aprobacion & { forzar: boolean }) =>
-      apiFetch(`/agentes/propuestas/${p.id}/aprobar`, {
-        method: 'POST',
-        body: { forzar, datos },
-      }),
-    onSuccess: () => {
+      apiFetch<{ resultado?: { conservados: unknown[] } }>(
+        `/agentes/propuestas/${p.id}/aprobar`,
+        { method: 'POST', body: { forzar, datos } }
+      ),
+    onSuccess: (r) => {
+      avisarConservados(r.resultado?.conservados.length)
       setConflicto(null)
       setAEditar(null)
       toast.success(t('agentes.proposals.approved'))
@@ -82,12 +86,14 @@ export function Propuestas() {
   })
   const lote = useMutation({
     mutationFn: (ids: string[]) =>
-      apiFetch<{ aprobadas: string[]; errores: { error: string }[] }>(
-        '/agentes/propuestas/aprobar-lote',
-        { method: 'POST', body: { ids } }
-      ),
+      apiFetch<{
+        aprobadas: string[]
+        errores: { error: string }[]
+        conservados?: number
+      }>('/agentes/propuestas/aprobar-lote', { method: 'POST', body: { ids } }),
     onSuccess: (r) => {
       setElegidas(new Set())
+      avisarConservados(r.conservados)
       if (r.aprobadas.length)
         toast.success(
           t('agentes.proposals.batch_ok', { count: r.aprobadas.length })

@@ -6,6 +6,7 @@
 const { v4: uuidv4 } = require("uuid");
 const N = require("./niveles");
 const { TIPOS, comoObjeto } = require("./aprobacion");
+const { canonico } = require("./mapa");
 const { evaluador } = require("./alcance");
 const { DIAS: ACTIVIDAD_DIAS } = require("./actividad");
 const { nuevaKey, hashDeKey } = require("./acceso");
@@ -213,7 +214,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
   /** Los campos en que lo aprobado difiere de lo propuesto, incluidos los que se sacaron. */
   function camposEditados(propuesto, aprobado) {
     const normal = (v) => (typeof v === "string" ? v.trim() || null : v ?? null); // validar() recorta espacios.
-    const igual = (a, b) => JSON.stringify(normal(a)) === JSON.stringify(normal(b));
+    const igual = (a, b) => canonico(normal(a)) === canonico(normal(b));
     return [...new Set([...Object.keys(propuesto), ...Object.keys(aprobado)])]
       .filter((k) => k in propuesto !== k in aprobado || !igual(propuesto[k], aprobado[k]));
   }
@@ -235,18 +236,18 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
           if (!a.dentro) throw new ErrorHttp(409, `El activo ya no está en el alcance: ${a.motivo}`);
         }
       }
-      const { findingId, despues } = await tipo.aplicar(tx, p, datos, {
+      const { findingId, despues, resultado } = await tipo.aplicar(tx, p, datos, {
         userId: req.user.id, forzar, deps: { qRows, qRun, auditLog }, persona: { id: req.user.id, username: req.user.username, ip: req.ip },
       });
       await tx.qRun("UPDATE agente_propuestas SET estado='aprobada', finding_id=?, datos_aprobados=?, campos_editados=?, decidida_por=?, decidida_en=NOW() WHERE id=?",
         [findingId, campos.length ? JSON.stringify(datos) : null, campos.length ? JSON.stringify(campos) : null, req.user.id, id]);
-      return { p, findingId, campos, despues };
+      return { p, findingId, campos, despues, resultado };
     });
     await anotar(req, "agente_propuesta_aprobar", r.findingId ? "findings" : "engagements", r.findingId ?? r.p.engagement_id,
       `Propuesta de la key "${r.p.key_nombre}"${r.campos.length ? `. Editada: ${r.campos.join(", ")}` : ""}`);
     if (r.despues) await r.despues();
     if (r.p.accion === "crear") notificar(r.findingId, r.p.engagement_id);
-    return r.findingId;
+    return { finding_id: r.findingId, ...(r.resultado ? { resultado: r.resultado } : {}) };
   }
 
   // Cada propuesta se aprueba en su propia transacción: una con problemas no frena al resto.
@@ -255,17 +256,18 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     if (!Array.isArray(ids) || !ids.length || ids.length > 300 || !ids.every((x) => typeof x === "string"))
       throw new ErrorHttp(400, `"ids" tiene que ser una lista de 1 a 300 propuestas.`);
     const aprobadas = [], errores = [];
+    let conservados = 0;
     for (const id of new Set(ids)) {
-      try { await aprobar(req, id, false); aprobadas.push(id); } catch (e) {
+      try { conservados += (await aprobar(req, id, false)).resultado?.conservados.length ?? 0; aprobadas.push(id); } catch (e) {
         if (!(e instanceof ErrorHttp)) console.error(`[GUNGNIR] Agentes: propuesta ${id}:`, e.message);
         errores.push({ id, error: e instanceof ErrorHttp ? e.message : "Error interno al aprobarla." });
       }
     }
-    res.json({ aprobadas, errores });
+    res.json({ aprobadas, errores, ...(conservados ? { conservados } : {}) });
   }));
 
   app.post("/api/agentes/propuestas/:id/aprobar", auth(ESCRIBEN), ruta(async (req, res) => {
-    res.json({ ok: true, finding_id: await aprobar(req, req.params.id, req.body?.forzar === true, req.body?.datos) });
+    res.json({ ok: true, ...(await aprobar(req, req.params.id, req.body?.forzar === true, req.body?.datos)) });
   }));
 
   app.post("/api/agentes/propuestas/:id/rechazar", auth(ESCRIBEN), ruta(async (req, res) => {

@@ -2322,6 +2322,8 @@
       }
     },
     "map": {
+      "conserved_one": "{{count}} dato no se aplicó: el mapa ya tenía otro.",
+      "conserved_other": "{{count}} datos no se aplicaron: el mapa ya tenía otros.",
       "title_one": "{{count}} equipo para el Attack Map",
       "title_other": "{{count}} equipos para el Attack Map",
       "owned": "Comprometido",

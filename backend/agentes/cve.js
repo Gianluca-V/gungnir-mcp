@@ -10,7 +10,7 @@ const { ErrorHttp } = require("./comun");
 
 const VIGENCIA = 24 * 60 * 60 * 1000;
 const TOPE = 500;
-const EPSS_VIEJO = 7 * VIGENCIA;
+const VIEJO = 7 * VIGENCIA;
 const EPSS_REINTENTO = 10 * 60 * 1000;
 const EPSS_TIEMPO = 8000;
 
@@ -62,11 +62,15 @@ function crear({ pedir = httpRequest, ahora = Date.now } = {}) {
  * FIRST si falta o quedó viejo. Nunca lanza: lo que no se sabe va como null, con un aviso.
  */
 function crearExplotacion({ qRow, descargar = E.descargarTexto, habilitada = E.habilitada, ahora = Date.now }) {
-  const memoria = new Map();
+  const memoria = new Map(), enCurso = new Map();
 
   async function deFirst(cve) {
     const m = memoria.get(cve);
     if (m && ahora() - m.t < (m.fallo ? EPSS_REINTENTO : VIGENCIA)) return m;
+    if (!enCurso.has(cve)) enCurso.set(cve, bajar(cve).finally(() => enCurso.delete(cve)));
+    return enCurso.get(cve);
+  }
+  async function bajar(cve) {
     let r;
     try {
       r = { t: ahora(), dato: P.parsearEpss(await descargar(`${E.URL_EPSS}?cve=${encodeURIComponent(cve)}`, { timeout: EPSS_TIEMPO, maxBytes: 200000 })).find((x) => x.cve === cve) ?? null };
@@ -77,7 +81,7 @@ function crearExplotacion({ qRow, descargar = E.descargarTexto, habilitada = E.h
   async function epssDe(cve) {
     const g = await qRow("SELECT epss, percentil, fecha, actualizado FROM vuln_epss WHERE cve=?", [cve]);
     const guardado = g && { epss: Number(g.epss), percentil: g.percentil == null ? null : Number(g.percentil), fecha: P.ymd(g.fecha) };
-    if (guardado && ahora() - new Date(g.actualizado).getTime() < EPSS_VIEJO) return { dato: guardado };
+    if (guardado && ahora() - new Date(g.actualizado).getTime() < VIEJO) return { dato: guardado };
     if (!habilitada()) return { dato: guardado, fallo: !guardado };
     const r = await deFirst(cve);
     return { dato: r.dato ?? guardado, fallo: r.fallo && !guardado };
@@ -85,17 +89,19 @@ function crearExplotacion({ qRow, descargar = E.descargarTexto, habilitada = E.h
   async function kevDe(cve) {
     const k = await qRow("SELECT alta, vence, ransomware FROM vuln_kev WHERE cve=?", [cve]);
     if (k) return k;
-    return Number((await qRow("SELECT COUNT(*) AS n FROM vuln_kev"))?.n) > 0 ? false : null;
+    // Que no esté solo dice algo si el catálogo es reciente. Cada descarga renueva la fecha de todas las filas.
+    const c = await qRow("SELECT COUNT(*) AS n, MAX(actualizado) AS actualizado FROM vuln_kev");
+    return Number(c?.n) > 0 && c.actualizado && ahora() - new Date(c.actualizado).getTime() < VIEJO ? false : null;
   }
 
   return async function explotacion(cve, severidad) {
     const avisos = [];
     const [k, e] = await Promise.all([kevDe(cve).catch(() => null), epssDe(cve).catch(() => ({ dato: null, fallo: true }))]);
-    if (k === null) avisos.push("No se sabe si está en KEV: el catálogo no está disponible en esta instalación.");
+    if (k === null) avisos.push("No se sabe si está en KEV: el catálogo no está descargado o es viejo.");
     if (e.fallo) avisos.push("No se pudo obtener EPSS.");
     const epss = e.dato?.epss ?? null;
     return {
-      kev: k === null ? null : Boolean(k), ...(k ? { kev_desde: P.ymd(k.alta), kev_vence: P.ymd(k.vence), ransomware: Boolean(Number(k.ransomware)) } : {}),
+      kev: k === null ? null : Boolean(k), ...(k ? { kev_desde: P.ymd(k.alta), kev_vence: P.ymd(k.vence), ransomware: Number(k.ransomware) === 1 ? true : null } : {}),
       epss, epss_percentil: e.dato?.percentil ?? null, epss_fecha: e.dato?.fecha ?? null,
       prioridad: k || severidad ? P.prioridad({ severidad, epss, kev: k ? 1 : 0 }) : null,
       ...(avisos.length ? { avisos } : {}),

@@ -23,14 +23,32 @@ function soloCampos(o, admite, que) {
   if (sobran.length) throw new ErrorHttp(400, `Campos no admitidos en ${que}: ${sobran.join(", ")}. Se admiten: ${admite.join(", ")}.`);
 }
 
-/** En qué columna va un objetivo: una sola IP, un nombre o una URL. */
+/** Una IP en su forma canónica, desde el número que da el control de alcance. */
+function textoDeIp({ v, ini }) {
+  if (v === 4) return [24n, 16n, 8n, 0n].map((b) => (ini >> b) & 255n).join(".");
+  const grupos = Array.from({ length: 8 }, (_, k) => ((ini >> BigInt(112 - 16 * k)) & 0xffffn).toString(16)).join(":");
+  return new URL(`http://[${grupos}]/`).hostname.slice(1, -1);
+}
+
+/** En qué columna va un objetivo (una sola IP, un nombre o una URL) y cómo se escribe. Null si no sirve. */
 function ubicar(objetivo) {
   const x = leer(objetivo);
-  if (x?.clase === "url" && /^https?:\/\//i.test(objetivo)) return { columna: "url_address", valor: objetivo };
-  const limpio = objetivo.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  if (x?.clase === "ip" && x.puerto === null && x.ini === x.fin && !objetivo.includes("/")) return { columna: "ip_address", valor: limpio };
-  if (x?.clase === "host" && x.puerto === null && !x.comodin) return { columna: "fqdn", valor: limpio };
-  throw new ErrorHttp(400, `"${objetivo}" no sirve como equipo: tiene que ser una sola IP, un nombre o una URL, sin puerto. Los puertos van en "puertos".`);
+  if (x?.clase === "url" && /^https?:\/\//i.test(objetivo)) {
+    const u = new URL(objetivo);
+    return u.username || u.password ? null : { columna: "url_address", valor: u.href };
+  }
+  if (x?.clase === "ip" && x.puerto === null && x.ini === x.fin && !objetivo.includes("/")) return { columna: "ip_address", valor: textoDeIp(x) };
+  if (x?.clase === "host" && x.puerto === null && !x.comodin) return { columna: "fqdn", valor: x.host };
+  return null;
+}
+/** Con qué se reconoce un equipo. Lo que ya está en el mapa lo pudo escribir una persona de cualquier forma. */
+const claveDe = (n) => ubicar(n)?.valor ?? n.trim().toLowerCase();
+/** Un texto que no depende del orden de las claves: MySQL las reordena al guardar JSON. */
+const canonico = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
+/** Si dos pedidos piden lo mismo, en cualquier orden. */
+function mismoPedido(a, b) {
+  const ordenar = ({ equipos }) => canonico(equipos.map((e) => canonico({ ...e, objetivo: claveDe(e.objetivo), puertos: (e.puertos || []).map(canonico).sort() })).sort());
+  return ordenar(a) === ordenar(b);
 }
 
 function validarPuertos(lista) {
@@ -60,10 +78,12 @@ function validar(b) {
   const equipos = b.equipos.map((e) => {
     soloCampos(e, ["objetivo", "os_type", "notas", "comprometido", "desde", "puertos"], "equipo");
     const objetivo = texto(e.objetivo, "objetivo", { max: 500, obligatorio: true });
-    const { columna, valor } = ubicar(objetivo);
-    if (valor.length > (columna === "fqdn" ? 255 : 1024)) throw new ErrorHttp(400, `"${objetivo.slice(0, 60)}..." es demasiado largo.`);
-    if (vistos.has(valor.toLowerCase())) throw new ErrorHttp(400, `El equipo "${objetivo}" está repetido.`);
-    vistos.add(valor.toLowerCase());
+    const lugar = ubicar(objetivo);
+    if (!lugar) throw new ErrorHttp(400, `Hay un equipo que no sirve: "objetivo" tiene que ser una sola IP, un nombre o una URL, sin puerto ni credenciales. Los puertos van en "puertos".`);
+    const { columna, valor } = lugar;
+    if (valor.length > (columna === "fqdn" ? 255 : 1024)) throw new ErrorHttp(400, `"${valor.slice(0, 60)}..." es demasiado largo.`);
+    if (vistos.has(valor)) throw new ErrorHttp(400, `El equipo "${valor}" está repetido.`);
+    vistos.add(valor);
     const puertos = validarPuertos(e.puertos);
     total += puertos.length;
     if (puertos.length && columna === "url_address") throw new ErrorHttp(400, `Una URL no lleva "puertos": cargalos en su IP o en su nombre.`);
@@ -94,15 +114,16 @@ const nombresDe = (t) => [t.ip_address, t.fqdn, t.url_address].filter(Boolean);
 
 /** Lo guarda. Quien llama ya tomó el engagement, así dos pedidos iguales no se cruzan. */
 async function aplicar(tx, engagementId, { equipos }) {
-  const filas = await tx.qRows("SELECT id,ip_address,fqdn,url_address,os_type,owned,jumped_from_id,notes FROM engagement_targets WHERE engagement_id=?", [engagementId]);
+  // Con bloqueo: se ve lo último y, si una persona guarda a la vez, espera y lo suyo queda.
+  const filas = await tx.qRows("SELECT id,ip_address,fqdn,url_address,os_type,owned,jumped_from_id,notes FROM engagement_targets WHERE engagement_id=? ORDER BY created_at, id FOR UPDATE", [engagementId]);
   const porNombre = new Map(), porId = new Map();
-  const sumar = (t) => { porId.set(t.id, t); for (const n of nombresDe(t)) if (!porNombre.has(n.toLowerCase())) porNombre.set(n.toLowerCase(), t); };
+  const sumar = (t) => { porId.set(t.id, t); for (const n of nombresDe(t)) if (!porNombre.has(claveDe(n))) porNombre.set(claveDe(n), t); };
   filas.forEach(sumar);
-  const r = { equipos_nuevos: 0, equipos_completados: 0, puertos_nuevos: 0, pivotes_nuevos: 0, conservados: [] };
+  const r = { equipos_nuevos: 0, equipos_completados: 0, puertos_nuevos: 0, puertos_completados: 0, pivotes_nuevos: 0, conservados: [] };
   const pares = [];
   for (const e of equipos) {
     const { columna, valor } = ubicar(e.objetivo);
-    let t = porNombre.get(valor.toLowerCase());
+    let t = porNombre.get(valor);
     if (!t) {
       if (porId.size >= TOPE_MAPA) throw new ErrorHttp(409, `El mapa ya tiene ${TOPE_MAPA} equipos.`);
       t = { id: uuidv4(), ip_address: null, fqdn: null, url_address: null, os_type: e.os_type || "other", owned: e.comprometido ? 1 : 0, jumped_from_id: null, notes: e.notas || null, [columna]: valor };
@@ -126,20 +147,33 @@ async function aplicar(tx, engagementId, { equipos }) {
         r.equipos_completados++;
       }
     }
-    const yaEstan = e.puertos ? new Set((await tx.qRows("SELECT port_number, protocol FROM target_ports WHERE target_id=?", [t.id])).map((p) => `${p.port_number}/${p.protocol}`)) : null;
+    const estaban = new Map((e.puertos ? await tx.qRows("SELECT id,port_number,protocol,state,service_name,product,version FROM target_ports WHERE target_id=? FOR UPDATE", [t.id]) : []).map((p) => [`${p.port_number}/${p.protocol}`, p]));
     for (const p of e.puertos || []) {
-      await tx.qRun(
-        `INSERT INTO target_ports (id,target_id,engagement_id,port_number,protocol,service_name,product,version) VALUES (?,?,?,?,?,?,?,?)
-         ON DUPLICATE KEY UPDATE service_name=COALESCE(NULLIF(service_name,''),VALUES(service_name)), product=COALESCE(NULLIF(product,''),VALUES(product)), version=COALESCE(NULLIF(version,''),VALUES(version))`,
-        [uuidv4(), t.id, engagementId, p.puerto, p.protocolo, p.servicio ?? null, p.producto ?? null, p.version ?? null]);
-      if (!yaEstan.has(`${p.puerto}/${p.protocolo}`)) r.puertos_nuevos++;
+      const nombre = `${p.puerto}/${p.protocolo}`, ya = estaban.get(nombre);
+      const conservar = (que) => r.conservados.push({ objetivo: e.objetivo, campo: `puerto ${nombre}: ${que}` });
+      if (!ya) {
+        await tx.qRun("INSERT INTO target_ports (id,target_id,engagement_id,port_number,protocol,service_name,product,version) VALUES (?,?,?,?,?,?,?,?)",
+          [uuidv4(), t.id, engagementId, p.puerto, p.protocolo, p.servicio ?? null, p.producto ?? null, p.version ?? null]);
+        r.puertos_nuevos++;
+        continue;
+      }
+      if (ya.state !== "open") { conservar(`estado ${ya.state}`); continue; }
+      const cambios = {};
+      for (const [k, columna2] of [["servicio", "service_name"], ["producto", "product"], ["version", "version"]]) {
+        if (!p[k] || p[k] === ya[columna2]) continue;
+        if (ya[columna2]) conservar(k); else cambios[columna2] = p[k];
+      }
+      const k = Object.keys(cambios);
+      if (!k.length) continue;
+      await tx.qRun(`UPDATE target_ports SET ${k.map((x) => `${x}=?`).join(",")} WHERE id=?`, [...Object.values(cambios), ya.id]);
+      r.puertos_completados++;
     }
     if (e.desde) pares.push([e, t]);
   }
   // Los pivotes van al final: el origen puede venir en el mismo pedido.
   for (const [e, t] of pares) {
-    const origen = porNombre.get(e.desde.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "")) || porNombre.get(e.desde.toLowerCase());
-    if (!origen) throw new ErrorHttp(422, `"${e.desde}" no está en el mapa: cargalo antes o en el mismo pedido.`);
+    const origen = porNombre.get(claveDe(e.desde));
+    if (!origen) throw new ErrorHttp(422, `El origen del pivote a "${e.objetivo}" no está en el mapa: cargalo antes o en el mismo pedido.`);
     if (t.jumped_from_id) {
       if (t.jumped_from_id !== origen.id) r.conservados.push({ objetivo: e.objetivo, campo: "desde" });
       continue;
@@ -155,4 +189,4 @@ async function aplicar(tx, engagementId, { equipos }) {
   return r;
 }
 
-module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe };
+module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, mismoPedido, canonico };

@@ -304,7 +304,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     const cuantos = datos.equipos.length;
     if (!N.alcanza(req.engagement.nivel, "escritura")) {
       const pendientes = await tx.qRows("SELECT id, datos FROM agente_propuestas WHERE engagement_id=? AND key_id=? AND accion='mapa' AND estado='pendiente'", [req.engagement.id, req.agente.keyId]);
-      const igual = pendientes.find((p) => JSON.stringify(mapa.validar(comoObjeto(p.datos))) === JSON.stringify(datos));
+      const igual = pendientes.find((p) => mapa.mismoPedido(comoObjeto(p.datos), datos));
       if (igual) throw new ErrorHttp(409, "Ya propusiste eso y está pendiente de aprobación.", { existente: { tipo: "propuesta", id: igual.id } });
       if (pendientes.length >= mapa.MAX_PENDIENTES) throw new ErrorHttp(409, `Ya hay ${pendientes.length} propuestas de mapa pendientes: esperá a que se decidan.`);
       const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "mapa", datos });

@@ -5,7 +5,7 @@
  *   validar(datos)              lo editado por la persona, con las mismas reglas que lo propuesto.
  *   objetivos(datos)            lo que tiene que seguir dentro del alcance.
  *   actual(q, p, datos)         lo que hay hoy, para comparar: { actual, cambio, titulo } o null.
- *   aplicar(tx, p, datos, ctx)  lo guarda y devuelve { findingId, despues }.
+ *   aplicar(tx, p, datos, ctx)  lo guarda y devuelve { findingId, despues, resultado }.
  */
 const H = require("./hallazgos");
 const mapa = require("./mapa");
@@ -74,8 +74,7 @@ const TIPOS = {
     actual: async () => null,
     async aplicar(tx, p, datos) {
       await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
-      await mapa.aplicar(tx, p.engagement_id, datos);
-      return { findingId: null };
+      return { findingId: null, resultado: await mapa.aplicar(tx, p.engagement_id, datos) };
     },
   },
 };

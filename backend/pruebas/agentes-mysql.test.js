@@ -905,7 +905,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       const r = await mandar("escritura", [COMPLETO, { objetivo: "10.10.1.2" }, { objetivo: "10.10.1.1".replace("1.1", "1.3"), desde: "10.10.1.2" }]);
       assert.equal(r.status, 200, r.texto);
       const x = (await mandar("escritura", [{ ...COMPLETO, desde: "10.10.1.2" }])).json;
-      assert.deepEqual(x.conservados.map((c) => c.campo).sort(), ["desde", "notas", "os_type"]);
+      assert.deepEqual(x.conservados.map((c) => c.campo).sort(), ["desde", "notas", "os_type", "puerto 22/tcp: servicio"]);
       const f = (await sql("SELECT * FROM engagement_targets WHERE id=?", [id]))[0];
       assert.deepEqual([f.os_type, f.notes, f.owned, f.jumped_from_id], ["windows", "de una persona", 1, otro]);
       const p = (await sql("SELECT service_name, product, version FROM target_ports WHERE target_id=? AND port_number=22", [id]))[0];
@@ -965,6 +965,77 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       await sql("UPDATE engagement_targets SET jumped_from_id=NULL WHERE engagement_id=? AND ip_address='10.10.1.1'", [E.a]);
       assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "10.10.1.3" }])).status, 422);
     });
+    test("🔴 lo que una persona guarda mientras el agente escribe no se pierde", async () => {
+      for (const via of ["directo", "aprobar"]) {
+        await limpio();
+        const id = await agregar({ ip: "10.10.1.2" }), otro = await agregar({ fqdn: "kali", os: "kali" }), mio = await agregar({ ip: "10.10.1.3" });
+        const equipos2 = [{ objetivo: "10.10.1.1", puertos: [{ puerto: 4444 }] }, { objetivo: "10.10.1.2", os_type: "windows", notas: "AGENTE", desde: "10.10.1.3" }];
+        const p = via === "aprobar" ? (await mandar("propuesta", equipos2)).json.propuesta_id : null;
+        await sql("CREATE TRIGGER puerto_lento BEFORE INSERT ON target_ports FOR EACH ROW BEGIN IF NEW.port_number=4444 THEN DO SLEEP(0.8); END IF; END");
+        try {
+          const enVuelo = p ? aprobar(p) : mandar("escritura", equipos2);
+          await new Promise((ok) => setTimeout(ok, 300));
+          const h = await pedir("PUT", `/api/engagements/${E.a}/targets/${id}`, { bearer: token("pentester"), body: { os_type: "linux", notes: "HUMANO", jumped_from_id: otro } });
+          assert.equal(h.status, 200); assert.equal((await enVuelo).status, 200);
+        } finally { await sql("DROP TRIGGER IF EXISTS puerto_lento"); }
+        const f = (await sql("SELECT os_type,notes,jumped_from_id FROM engagement_targets WHERE id=?", [id]))[0];
+        assert.deepEqual({ ...f }, { os_type: "linux", notes: "HUMANO", jumped_from_id: otro }, `${via} ${mio}`);
+      }
+    });
+    test("🔴 aprobar dos a la vez, o aprobar mientras otro escribe, no duplica equipos", async () => {
+      for (const directo of [false, true]) {
+        await limpio(); await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
+        const ids = [];
+        for (const notas of ["una", "dos"]) ids.push((await mandar("propuesta", [{ objetivo: "10.10.4.4", notas, puertos: [{ puerto: 22 }] }])).json.propuesta_id);
+        const con = await pool.getConnection();
+        await con.beginTransaction();
+        await con.query("SELECT id FROM engagements WHERE id=? FOR UPDATE", [E.a]);
+        const r = Promise.all([aprobar(ids[0]), directo ? mandar("escritura", [{ objetivo: "10.10.4.4" }]) : aprobar(ids[1])]);
+        await new Promise((ok) => setTimeout(ok, 500));
+        await con.commit(); con.release();
+        assert.deepEqual((await r).map((x) => x.status), [200, 200]);
+        assert.equal(await equipos(), 1);
+      }
+    });
+    test("🔴 lo que no se aplicó de un puerto se informa, también a quien aprueba", async () => {
+      await limpio();
+      const id = await agregar({ ip: "10.10.1.1" });
+      await sql("INSERT INTO target_ports (id,target_id,engagement_id,port_number,state,service_name,product,version) VALUES (?,?,?,22,'open','ssh','OpenSSH','7.4'),(?,?,?,80,'closed',NULL,NULL,NULL)", [uid(), id, E.a, uid(), id, E.a]);
+      const e = [{ objetivo: "10.10.1.1", puertos: [{ puerto: 22, servicio: "telnet", producto: "OpenSSH", version: "2020" }, { puerto: 80, servicio: "http" }] }];
+      const campos = ["puerto 22/tcp: servicio", "puerto 22/tcp: version", "puerto 80/tcp: estado closed"];
+      const r = (await mandar("escritura", e)).json;
+      assert.deepEqual(r.conservados.map((x) => x.campo), campos);
+      assert.equal(r.puertos_nuevos, 0);
+      const p = (await mandar("propuesta", e)).json.propuesta_id;
+      assert.deepEqual((await aprobar(p)).json.resultado.conservados.map((x) => x.campo), campos);
+      const f = await sql("SELECT port_number,state,service_name,product,version FROM target_ports WHERE target_id=? ORDER BY port_number", [id]);
+      assert.deepEqual(f.map((x) => ({ ...x })), [{ port_number: 22, state: "open", service_name: "ssh", product: "OpenSSH", version: "7.4" }, { port_number: 80, state: "closed", service_name: null, product: null, version: null }]);
+      await sql("UPDATE target_ports SET version='' WHERE target_id=? AND port_number=22", [id]);
+      assert.equal((await mandar("escritura", e)).json.puertos_completados, 1);
+    });
+    test("🔴 aprobar sin cambios desde el diálogo no cuenta como edición", async () => {
+      await limpio(); await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
+      const p = (await mandar("propuesta", [COMPLETO])).json.propuesta_id;
+      const d = (await panel("auditor", "GET", `/propuestas/${p}`)).json.datos;
+      assert.equal((await aprobar(p, { datos: { equipos: d.equipos } })).status, 200);
+      const f = (await sql("SELECT campos_editados, datos_aprobados FROM agente_propuestas WHERE id=?", [p]))[0];
+      assert.deepEqual({ ...f }, { campos_editados: null, datos_aprobados: null });
+    });
+    test("🔴 el mismo equipo escrito de otra forma es el mismo equipo", async () => {
+      await limpio();
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.3.3" }])).json.equipos_nuevos, 1);
+      for (const o of ["::ffff:10.10.3.3", "[::ffff:10.10.3.3]", "１０.10.3.3"]) assert.equal((await mandar("escritura", [{ objetivo: o }])).json.equipos_nuevos, 0, o);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.3.4" }, { objetivo: "::ffff:10.10.3.4" }])).status, 400);
+      assert.equal((await mandar("escritura", [{ objetivo: "app。ejemplo。com" }, { objetivo: "10.10.3.5", desde: "APP.ejemplo.com." }])).status, 200);
+      assert.deepEqual((await sql("SELECT COALESCE(ip_address,fqdn) AS n FROM engagement_targets WHERE engagement_id=? ORDER BY n", [E.a])).map((x) => x.n), ["10.10.3.3", "10.10.3.5", "app.ejemplo.com"]);
+    });
+    test("en una URL importan las mayúsculas de la ruta, y no se admiten credenciales", async () => {
+      await limpio();
+      assert.equal((await mandar("escritura", [{ objetivo: "https://app.ejemplo.com/Admin" }, { objetivo: "https://app.ejemplo.com/admin" }])).json.equipos_nuevos, 2);
+      assert.equal((await mandar("escritura", [{ objetivo: "HTTPS://APP.ejemplo.com/Admin" }])).json.equipos_nuevos, 0);
+      const r = await mandar("escritura", [{ objetivo: "https://u:Sup3rClave9@app.ejemplo.com/x" }]);
+      assert.equal(r.status, 400); assert.ok(!r.texto.includes("Sup3rClave9"));
+    });
     test("🔴 no toca el mapa de otro engagement", async () => {
       await limpio();
       const id = uid();
@@ -1013,6 +1084,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     test("🔴 una propuesta igual a una pendiente se rechaza, y hay tope de pendientes", async () => {
       await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
       const p = (await mandar("propuesta", [COMPLETO])).json.propuesta_id;
+      assert.equal((await mandar("propuesta", [{ ...COMPLETO, puertos: [...COMPLETO.puertos].reverse() }])).status, 409);
       const r = await mandar("propuesta", [{ puertos: COMPLETO.puertos, notas: "DMZ", os_type: "linux", objetivo: "10.10.1.1" }]);
       assert.equal(r.status, 409); assert.equal(r.json.existente.id, p);
       for (let i = 0; i < 49; i++) assert.equal((await mandar("propuesta", [{ objetivo: `10.10.3.${i}` }])).status, 202);
@@ -1406,8 +1478,8 @@ describe("CVE", () => {
     assert.equal(n, 1); assert.equal(r.cvss_vector_31, "AV:N"); assert.equal(r.severity, "critical"); assert.equal(r.cwe_id, "CWE-79");
   });
   describe("explotación: KEV y EPSS", () => {
-    const base = ({ kev = null, epss = null, catalogo = 1500 } = {}) => async (q) =>
-      (/COUNT/.test(q) ? { n: catalogo } : /vuln_kev/.test(q) ? kev : /vuln_epss/.test(q) ? epss : assert.fail(q));
+    const base = ({ kev = null, epss = null, catalogo = 1500, bajado = new Date() } = {}) => async (q) =>
+      (/COUNT/.test(q) ? { n: catalogo, actualizado: bajado } : /vuln_kev/.test(q) ? kev : /vuln_epss/.test(q) ? epss : assert.fail(q));
     const first = (epss, percentile = 0.9) => JSON.stringify({ data: [{ cve: "CVE-2024-1234", epss: String(epss), percentile: String(percentile), date: "2026-11-20" }] });
     const crear = (b, x = {}) => cve.crearExplotacion({ qRow: base(b), descargar: async () => assert.fail("no debía salir a la red"), habilitada: () => true, ...x });
     const HOY = new Date();
@@ -1424,6 +1496,24 @@ describe("CVE", () => {
     test("🔴 sin el catálogo descargado no dice que no está explotada", async () => {
       const r = await crear({ catalogo: 0, epss: { epss: 0.1, percentil: 0.5, fecha: null, actualizado: HOY } })("CVE-2024-1234", "high");
       assert.equal(r.kev, null); assert.match(r.avisos[0], /KEV/);
+    });
+    test("🔴 un catálogo viejo tampoco permite decir que no está explotada, y lo que está en él sigue valiendo", async () => {
+      for (const bajado of [new Date("2019-06-01"), null]) {
+        const epss = { epss: 0.1, percentil: 0.5, fecha: null, actualizado: HOY };
+        const r = await crear({ bajado, epss })("CVE-2024-1234", "high");
+        assert.equal(r.kev, null); assert.match(r.avisos[0], /KEV/);
+        assert.equal((await crear({ bajado, epss, kev: { alta: null, vence: null, ransomware: 1 } })("CVE-2024-1234", "high")).kev, true);
+      }
+    });
+    test("🔴 CISA no confirma que no se use en ransomware: se informa desconocido", async () => {
+      const r = await crear({ kev: { alta: null, vence: null, ransomware: 0 }, epss: { epss: 0.1, percentil: null, fecha: null, actualizado: HOY } })("CVE-2024-1234", "high");
+      assert.equal(r.ransomware, null);
+    });
+    test("muchas consultas a la vez del mismo CVE hacen una sola descarga", async () => {
+      let n = 0;
+      const f = crear({}, { descargar: async () => { n++; await new Promise((ok) => setTimeout(ok, 30)); return first(0.3); } });
+      const r = await Promise.all(Array.from({ length: 10 }, () => f("CVE-2024-1234", "high")));
+      assert.equal(n, 1); assert.ok(r.every((x) => x.epss === 0.3));
     });
     test("🔴 si falta EPSS lo pide a FIRST, lo recuerda y no repite", async () => {
       let n = 0, url;

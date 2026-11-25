@@ -2322,6 +2322,8 @@
       }
     },
     "map": {
+      "conserved_one": "{{count}} value was not applied: the map already had another.",
+      "conserved_other": "{{count}} values were not applied: the map already had others.",
       "title_one": "{{count}} host for the Attack Map",
       "title_other": "{{count}} hosts for the Attack Map",
       "owned": "Compromised",
