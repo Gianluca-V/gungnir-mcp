@@ -13,6 +13,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Ocultamiento por patrones de datos del cliente y secretos en lo que recibe un agente.
 - Pantalla Integraciones > Agentes y aviso en la cabecera.
 - Contenedor opcional para correr el agente aislado, en `agente/`.
+- Guía de uso y configuración en `docs/guia-gungnir-mcp.html`.
 
 ### Cambiado
 - El límite general de pedidos ya no cuenta los de `/api/agente/v1`, que tienen el suyo.

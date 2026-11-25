@@ -2,6 +2,8 @@
 
 Servidor MCP para trabajar con Gungnir desde agentes como Claude Code u opencode. Corre en tu equipo por stdio y usa la API de Gungnir con una key de agente.
 
+Guía completa, con ejemplos y configuraciones: [`docs/guia-gungnir-mcp.html`](../docs/guia-gungnir-mcp.html).
+
 No ejecuta escaneos ni exploits. Le da al agente el alcance, la metodología y un lugar donde registrar; las herramientas las corre el agente en su propia terminal.
 
 ## Puesta en marcha
