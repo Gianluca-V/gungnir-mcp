@@ -16,7 +16,7 @@ const importacion = require("./importacion");
 const mapa = require("./mapa");
 const retest = require("./retest");
 const { comoObjeto } = require("./aprobacion");
-const { evaluar, evaluador, objetivosClaros } = require("./alcance");
+const { evaluar, evaluador, juzgarActivo } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion, reintentando } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
@@ -171,7 +171,12 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
     if (f.status === "accepted" && datos.status) throw new ErrorHttp(409, "Una persona aceptó el riesgo de este hallazgo: su estado no se cambia desde acá.");
     // El activo que ya tiene también cuenta, aunque se lo quiera cambiar: eso lo corrige una persona.
-    for (const o of objetivosClaros(f.affected_asset)) await exigirActivoEnAlcance(tx, req, o, { que: "El cambio" });
+    const fuera = juzgarActivo(f.affected_asset, evaluador(await alcanceDe(tx, req.engagement.id)));
+    if (fuera) {
+      const e = new ErrorHttp(422, `El cambio se rechazó por alcance: ${req.ocultar.texto(fuera.motivo, true)} El activo de este hallazgo lo corrige una persona.`);
+      e.violaciones = [{ tipo: "hallazgo", ...fuera }];
+      throw e;
+    }
     if (datos.affected_asset) await exigirActivoEnAlcance(tx, req, datos.affected_asset);
     if (!N.alcanza(req.engagement.nivel, "escritura")) {
       const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "actualizar", findingId: f.id, datos, huella: H.huellaDe(f) });

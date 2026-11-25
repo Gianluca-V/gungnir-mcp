@@ -226,7 +226,7 @@ function evaluarPreparado(objetivo, si, no) {
   const texto = String(objetivo ?? "").trim();
   if (!texto) return { dentro: false, motivo: "No se indicó un objetivo." };
   if (no.libres.has(normal(texto))) return { dentro: false, excluido: true, motivo: `"${texto}" está excluido del alcance.` };
-  if (no.ilegible) return { dentro: false, motivo: `No se puede interpretar la exclusión "${no.ilegible}": hay que corregirla en el alcance.` };
+  if (no.ilegible) return { dentro: false, exclusionIlegible: true, motivo: `No se puede interpretar la exclusión "${no.ilegible}": hay que corregirla en el alcance.` };
   const partes = partir(texto).map((parte) => [parte, leer(parte)]);
   const excluida = partes.find(([, t]) => t && no.red.some((e) => toca(e, t)));
   if (excluida) return { dentro: false, excluido: true, motivo: `"${excluida[0]}" está excluido del alcance.` };
@@ -240,20 +240,48 @@ function evaluarPreparado(objetivo, si, no) {
   return { dentro: true, motivo: null };
 }
 
-// Con punto y todo, son archivos y no equipos.
-const ARCHIVO = /\.(?:js|jsx|ts|tsx|mjs|cjs|py|rb|php|java|go|rs|cs|c|h|cpp|sh|ps1|sql|json|ya?ml|xml|html?|css|md|txt|lock|toml|ini|conf|cfg|env|properties|gradle|tf)$/i;
+// Con punto y todo, son archivos y no equipos. Solo extensiones que no son dominios de primer nivel.
+const ARCHIVO = /\.(?:jsx?|tsx?|mjs|cjs|rb|php|java|go|cs|c|h|cpp|ps1|sql|json|ya?ml|xml|html?|css|txt|lock|toml|ini|conf|cfg|config|env|gradle|jar|war|dll|exe|aspx?|jsp|bak|log|csv|pem|crt)$/i;
+const FORJA = /^(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|dev\.azure\.com)$/;
+const ARCHIVO_Y_LINEA = /(?:^|\s)\S+:\d+$/;
+const conPunto = (h) => h.includes(".") && /\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/.test(h) && !ARCHIVO.test(h);
+
+/** Si un pedazo de texto nombra sin dudas un equipo: una dirección, un nombre con punto o una URL hacia ellos. */
+function esClaro(p, { repositorio }) {
+  const t = leer(p);
+  if (!t) return false;
+  if (tieneIp(t)) return true;
+  if (!conPunto(t.host)) return false;
+  // "github.com/org/app" o "gitlab.x.com/org/app src/db.js:42" son repositorios.
+  return !(t.clase === "url" && !t.esquema && (FORJA.test(t.host) || repositorio));
+}
+/** Los pedazos de un texto. Una URL va entera; del resto se saca la puntuación que suele rodear a un equipo. */
+function pedazos(texto) {
+  return String(texto).split(/\s+/).flatMap((p) => {
+    const url = /[a-z][a-z0-9+.-]*:\/\/\S+/i.exec(p)?.[0];
+    if (url) return [url.replace(/[)>\]}"',;.]+$/, "")];
+    if (/^\[[0-9a-f:.]+\](?::\d+)?(?:\/\w+)?$/i.test(p)) return [p];
+    return p.split(/[,;()"'<>{}[\]|=]+/).map((x) => x.replace(/[:.]+$/, ""));
+  }).filter(Boolean);
+}
 /**
- * Los objetivos claros dentro de un texto que escribió una persona: direcciones, nombres con punto y URL.
- * "srv-web (10.0.0.5) 443/tcp" da 10.0.0.5. Una etiqueta ("Portal", "src/db.js:42") no da ninguno.
+ * Si el activo que ya tiene un hallazgo impide tocarlo: { objetivo, motivo }, o null. Lo pudo escribir una
+ * persona de cualquier forma: primero vale el texto entero, y si no se sabe, los equipos que nombra sin dudas.
+ * Una etiqueta ("Portal", "src/db.js:42") no se juzga.
  */
-function objetivosClaros(texto) {
-  return String(texto ?? "").split(/[\s,;()"'<>]+/).filter((p) => {
-    if (/^https?:\/\//i.test(p)) return leer(p) !== null;
-    const t = leer(p);
-    if (!t) return false;
-    if (tieneIp(t)) return t.clase === "ip";
-    return t.clase === "host" && t.host.includes(".") && /\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/.test(t.host) && !ARCHIVO.test(t.host);
-  });
+function juzgarActivo(texto, evaluar) {
+  const activo = String(texto ?? "").trim();
+  if (!activo) return null;
+  const r = evaluar(activo);
+  if (r.dentro) return null;
+  if (r.excluido || r.exclusionIlegible) return { objetivo: activo, motivo: r.motivo };
+  const repositorio = ARCHIVO_Y_LINEA.test(activo) && /\s/.test(activo);
+  for (const p of pedazos(activo)) {
+    if (!esClaro(p, { repositorio })) continue;
+    const x = evaluar(p);
+    if (!x.dentro) return { objetivo: p, motivo: x.motivo };
+  }
+  return null;
 }
 
-module.exports = { evaluar, evaluador, leer, objetivosClaros };
+module.exports = { evaluar, evaluador, leer, juzgarActivo };

@@ -303,3 +303,32 @@ test("🔴 la huella de un hallazgo no depende de la zona horaria del servidor",
   const ver = (TZ) => execFileSync(process.execPath, ["-e", `const H=require(${JSON.stringify(require.resolve("../agentes/hallazgos"))});process.stdout.write(H.huellaDe({title:"x",remediation_due_date:new Date(2030,4,7),retested_at:new Date(2030,4,7,23,59,1)}))`], { env: { ...process.env, TZ } }).toString();
   assert.equal(ver("UTC"), ver("America/Argentina/Buenos_Aires"));
 });
+
+describe("el activo que ya tiene un hallazgo", () => {
+  const { evaluador, juzgarActivo } = require("../agentes/alcance");
+  const en = (type, value, in_scope = 1) => ({ type, value, in_scope });
+  const ALC = [en("cidr", "10.10.0.0/16"), en("domain", "cliente.test"), en("domain", "*.cliente.test"), en("application", "API v2 en api.externa.test"), en("ip", "2001:db8::5"),
+    en("ip", "10.10.9.9", 0), en("domain", "pagos.sub.cliente.test", 0), en("url", "https://web.cliente.test/app", 0), en("domain", "intranet", 0), en("application", "Portal Pagos", 0)];
+  const pasa = (a, items = ALC) => juzgarActivo(a, evaluador(items)) === null;
+  describe("🔴 no se toca lo excluido ni lo que está claramente fuera", () => {
+    for (const a of ["10.10.9.9", "ssh://10.10.9.9", "10.10.9.9/admin", "10.10.9.9:22/tcp", "10.10.0.0/16", "web.cliente.test/app/admin", "pagos.sub.cliente.test/login", "intranet", "intranet/x", "Portal Pagos", "Portal 10.10.9.9",
+      "10.0.0.5", "10.0.0.5/admin", "10.0.0.5:8443/login", "10.0.0.5-20", "8.8.0.0/24", "evil.test", "evil.test.", "evil.test/login", "evil.test:8443/login", "https://evil.test/x", "https://u:p@evil.test/", "ftp://evil.test", "ssh://evil.test",
+      "smb://10.0.0.5/c$", "evil.sh", "evil.py", "evil.rs", "xn--bcher-kva.example", "bücher.example", "[2001:db8::9]:443", "2001:db8::9", "srv (8.8.8.8) 443/tcp", "srv-web[10.0.0.5]", "host=10.0.0.5", "{10.0.0.5}", "a|10.0.0.5", "evil.test:", "10.0.0.5:",
+      "evil.test (prod)", "10.10.1.1, 8.8.8.8", "10.10.1.1 y evil.test", "\"evil.test\"", "<https://evil.test/a>", "evil.test/a src/db.js"])
+      test(a, () => assert.equal(pasa(a), false));
+  });
+  describe("🔴 lo que está dentro sigue editable, aunque nombre otra cosa en la URL", () => {
+    for (const a of ["10.10.1.1", "10.10.1.1:80/tcp", "ssh://10.10.1.1", "cliente.test", "app.cliente.test:443", "https://app.cliente.test/x", "app.cliente.test/x", "[2001:db8::5]:443", "10.10.1.0/24", "10.10.1.1 10.10.1.2", "API v2 en api.externa.test",
+      "https://app.cliente.test/r?u='https://evil.test'", "https://app.cliente.test/ssrf?h=a,10.0.0.1", "https://app.cliente.test/?q=(evil.test)", "https://app.cliente.test/?cb=a;b.evil.test", "srv-web (10.10.1.1) 80/tcp", "app.cliente.test (10.10.1.1) 443/tcp"])
+      test(a, () => assert.equal(pasa(a), true));
+  });
+  describe("🔴 una etiqueta de una persona o del seguimiento no se juzga, con o sin alcance", () => {
+    for (const a of ["", null, "Tablero", "Aplicación web", "N/A", "Dockerfile", "src/db.js:42", "org/app", "github.com/org/app src/db.js:42", "github.com/org/app", "gitlab.otro.test/org/app src/db.js:42", "srv-web", "s3://balde", "server.js",
+      "web.config", "index.aspx", "log4j-core-2.14.1.jar", "package.json", "v1.2.3", "registry/app:1.2", "alpine:3.18"])
+      test(String(a), () => { assert.equal(pasa(a), true); assert.equal(pasa(a, []), true); });
+  });
+  test("🔴 con una exclusión ilegible nada es editable", () => {
+    for (const a of ["Tablero", "10.10.1.1"]) assert.equal(pasa(a, [...ALC, en("ip", "10.0.0.5,6", 0)]), false);
+    assert.equal(pasa("", [...ALC, en("ip", "10.0.0.5,6", 0)]), true, "sin activo no hay qué juzgar");
+  });
+});
