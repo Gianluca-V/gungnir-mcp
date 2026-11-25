@@ -87,8 +87,8 @@ Vale el más restrictivo entre la key, el engagement, el rol de quien creó la k
 |---|---|
 | Sin acceso | Nada. Es el valor inicial de cada engagement |
 | Lectura | Consultar |
-| Propuesta | Además, registrar logs y evidencias. Los hallazgos esperan aprobación |
-| Escritura | Además, crear y modificar hallazgos, metodología y técnicas |
+| Propuesta | Además, registrar logs y evidencias. Los hallazgos y el mapa esperan aprobación |
+| Escritura | Además, crear y modificar hallazgos, mapa, metodología y técnicas |
 | Total | Además, borrar hallazgos, logs y evidencias |
 
 **Pausa.** Desde Integraciones > Agentes se frena a todos los agentes o a un engagement. Corta lectura y escritura (error 423) sin tocar niveles ni keys; confirmada, no se guarda ninguna escritura más. Pausa un admin, auditor o pentester; reanuda un admin o auditor. No detiene lo que un agente ya corra en su terminal.
@@ -107,9 +107,14 @@ Ningún nivel permite cambiar el alcance, aprobar propuestas, ni administrar usu
 | `ver_alcance` `verificar_alcance` | `crear_hallazgo` `modificar_hallazgo` |
 | `listar_registros` `ver_hallazgo` | `adjuntar_evidencia` `importar_escaneo` |
 | `ver_metodologia` `buscar_arsenal` | `marcar_metodologia` `registrar_tecnica` |
+| `ver_mapa` | `registrar_mapa` `proponer_retest` |
 | `buscar_plantillas` `consultar_cve` | `borrar` |
 
-Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_explotacion` y `reporte`.
+Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_explotacion`, `reporte` y `retest`.
+
+- **`proponer_retest`** siempre espera a una persona, en cualquier nivel: cierra o reabre hallazgos.
+- **`registrar_mapa`** propone (Propuesta) o guarda (Escritura) equipos, puertos y pivotes del Attack Map. Solo agrega o completa lo vacío; lo que conservó vuelve en `conservados`. Con algo fuera de alcance, no guarda nada.
+- **`consultar_cve`** suma si se explota hoy (KEV), la probabilidad de que se explote (EPSS) y una prioridad. `null` es desconocido. `VULN_FUENTES_EXTERNAS=0` en el servidor apaga las consultas a CISA y FIRST.
 
 `importar_escaneo` lee nmap (`-oX`), Nessus, OpenVAS, Burp, ZAP y Nuclei (JSONL). Es la forma más económica en tokens: guarda el original como evidencia y devuelve un resumen. El informe PDF se genera desde el panel.
 

@@ -6,7 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 ## [Sin publicar] - fork con agentes por MCP
 
 ### Agregado
-- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 18 herramientas y prompts por fase.
+- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 21 herramientas y prompts por fase.
 - API para agentes en `/api/agente/v1`, con keys propias, límite de pedidos por key, reintentos seguros y auditoría. Las API keys anteriores no cambian.
 - Niveles de autonomía por key y por engagement. Los engagements existentes quedan sin acceso.
 - Propuestas de hallazgos que aprueba una persona, y registro de acciones fuera de alcance.
@@ -16,6 +16,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Pausa de todos los agentes o de un engagement.
 - Actividad por key: escrituras, rechazos y acciones fuera de alcance.
 - Edición de propuestas antes de aprobarlas, con comparación en los cambios.
+- Retest propuesto por agentes, que siempre aprueba una persona.
+- Attack Map: los agentes lo consultan y suman o proponen equipos, puertos y pivotes, sin pisar lo cargado por personas.
+- `consultar_cve` suma KEV, EPSS y prioridad.
 - Guía de uso y configuración en `docs/guia-gungnir-mcp.html`.
 
 ### Cambiado
