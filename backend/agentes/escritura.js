@@ -234,12 +234,12 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     const leidos = importacion.leer(formato, req.file.buffer.toString("utf8"));
     await enFila(tx, req.engagement.id);
     const items = await alcanceDe(tx, req.engagement.id);
-    const { aceptados, fuera, bajoMinimo, sinEquipo, excede } = importacion.clasificar(leidos, items, minima);
+    const { aceptados, fuera, bajoMinimo, sinEquipo } = await importacion.clasificar(leidos, items, minima);
     const fueraDeAlcance = [...fuera].slice(0, TOPE_VIOLACIONES).map(([objetivo, motivo]) => ({ tipo: "importacion", objetivo, motivo }));
     if (fuera.size > TOPE_VIOLACIONES)
       fueraDeAlcance.push({ tipo: "importacion", objetivo: `${fuera.size - TOPE_VIOLACIONES} equipos más`, motivo: `El archivo trae ${fuera.size} equipos fuera de alcance.` });
-    if (excede || aceptados.length > importacion.TOPE) {
-      const e = new ErrorHttp(413, `El archivo trae ${excede ? `${excede} resultados` : `${aceptados.length} hallazgos`} y el tope es ${excede ? importacion.TOPE_LECTURA : importacion.TOPE}. Subí "severidad_minima" o dividí el archivo.`);
+    if (aceptados.length > importacion.TOPE) {
+      const e = new ErrorHttp(413, `El archivo trae ${aceptados.length} hallazgos y el tope es ${importacion.TOPE}. Subí "severidad_minima" o dividí el archivo.`);
       e.violaciones = fueraDeAlcance;
       throw e;
     }

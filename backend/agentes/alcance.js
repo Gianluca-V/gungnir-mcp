@@ -20,17 +20,20 @@ const ES_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX32 = (1n << 32n) - 1n;
 const HOST = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9_][a-z0-9_-]{0,62})*$/;
 // "10.0.0.x", "10.x.1.1-10", "10.0.0-1.1-20": direcciones mal escritas que pasarían por nombres. Lo son si
-// las tres primeras partes de cuatro parecen octetos. Con menos partes tienen que parecerlo todas, y además
-// la última no puede ser un dominio de primer nivel o alguna anterior tiene que ser un comodín: 123.xyz y
-// 12.nz son nombres, igual que 1.2.acme.com y 168.192.in-addr.arpa; 10.0.x y 10.x.xxx no.
+// las tres primeras partes de cuatro parecen octetos. Con menos partes tienen que parecerlo todas; la excepción
+// son nombres registrables como 123.xyz, 1.2.xyz o 12.nz. Ante la duda cuenta como dirección: un comienzo de
+// red (10, 127, 169, 172, 192), un rango, un comodín en el medio o "203.0.xxx". Así una exclusión como
+// "192.168.xxx" cierra todo en vez de no excluir nada.
 // "xn--020-..." es "0–20" con guion largo; un dominio de primer nivel (xn--80adxhks) no lleva dígitos propios.
 const OCTETO = /^(?:\d{1,3}(?:-\d{1,3})?|[nxyz]{1,3}|xn--\d{1,6}-.*)$/;
-const COMODIN = /^[nxyz]{1,3}$/, PRIMER_NIVEL = /^(?:nz|xyz|xxx)$/;
 function direccionRota(h) {
   const p = h.split(".");
   if (p.length < 2 || p.length > 4 || !/^\d/.test(p[0])) return false;
   if (p.length === 4) return p.slice(0, 3).every((x) => OCTETO.test(x));
-  return p.every((x) => OCTETO.test(x)) && (!PRIMER_NIVEL.test(p.at(-1)) || p.slice(0, -1).some((x) => COMODIN.test(x)));
+  if (!p.every((x) => OCTETO.test(x))) return false;
+  const nombre = p.slice(0, -1).every((x) => /^\d+$/.test(x)) && !/^(?:10|127|169|172|192)$/.test(p[0])
+    && (/^(?:nz|xyz)$/.test(p.at(-1)) || (p.length === 2 && p[1] === "xxx"));
+  return !nombre;
 }
 const PUERTO_DE_ESQUEMA = {
   http: 80, https: 443, ws: 80, wss: 443, ftp: 21, ftps: 990, ssh: 22, sftp: 22, telnet: 23, smb: 445, rdp: 3389, ldap: 389, ldaps: 636,

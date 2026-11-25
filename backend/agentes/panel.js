@@ -123,11 +123,17 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     if (!e) throw new ErrorHttp(404, "El engagement no existe.");
     if (sensibles && nivel === null && (e.nivel_max ?? "ninguno") === "ninguno")
       throw new ErrorHttp(409, "El engagement ya no tiene acceso: habilitalo antes de mostrar datos sensibles.");
-    // El IF cubre que alguien quite el acceso entre la consulta y esto (nivel_max ya es el valor nuevo).
+    // Sin acceso, antes o después del cambio, los datos quedan ocultos salvo que este pedido los muestre al
+    // habilitarlo. mostrar_sensibles va primero: MySQL asigna en orden y todavía ve el nivel anterior.
     await qRun(
       `INSERT INTO agente_engagements (engagement_id,nivel_max,mostrar_sensibles,actualizado_por) VALUES (?,COALESCE(?,'ninguno'),COALESCE(?,0),?)
-       ON DUPLICATE KEY UPDATE nivel_max=COALESCE(?,nivel_max), mostrar_sensibles=IF(nivel_max='ninguno',0,COALESCE(?,mostrar_sensibles)), actualizado_por=VALUES(actualizado_por)`,
-      ((v) => [e.id, nivel, v, req.user.id, nivel, v])(sensibles === undefined ? null : sensibles ? 1 : 0));
+       ON DUPLICATE KEY UPDATE mostrar_sensibles=IF(COALESCE(?,nivel_max)='ninguno',0,COALESCE(?,IF(nivel_max='ninguno',0,mostrar_sensibles))), nivel_max=COALESCE(?,nivel_max), actualizado_por=VALUES(actualizado_por)`,
+      ((v) => [e.id, nivel, v, req.user.id, nivel, v, nivel])(sensibles === undefined ? null : sensibles ? 1 : 0));
+    if (sensibles) {
+      // Si alguien quitó el acceso en el medio, no se aplicó: ni se responde que sí ni se audita.
+      const q = await qRow("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [e.id]);
+      if (!q?.mostrar_sensibles) throw new ErrorHttp(409, "El acceso cambió mientras tanto y los datos siguen ocultos. Revisalo y volvé a intentar.");
+    }
     await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: ${[nivel && `nivel ${nivel}`, sensibles !== undefined && `datos sensibles ${sensibles ? "visibles" : "ocultos"}`].filter(Boolean).join(", ")}`);
     res.json({ ok: true });
   }));

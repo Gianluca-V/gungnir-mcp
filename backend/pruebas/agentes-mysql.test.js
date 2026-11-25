@@ -388,20 +388,37 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
         assert.equal(correos, antes + 1, "el aviso se intenta igual");
       } finally { await sql("DELETE FROM settings WHERE `key`='notificaciones'"); }
     });
-    test("🔴 el tope de lectura cuenta lo que pasa la severidad mínima, y al superarlo también deja constancia", async () => {
+    test("🔴 un acceso quitado con datos visibles de antes no los muestra al habilitarlo", async () => {
+      try {
+        await sql("REPLACE INTO agente_engagements (engagement_id,nivel_max,mostrar_sensibles) VALUES (?,'ninguno',1)", [E.a]);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "lectura" })).status, 200);
+        assert.equal((await sql("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].mostrar_sensibles, 0);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "total", mostrar_sensibles: true })).status, 200);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "lectura" })).status, 200);
+        assert.equal((await sql("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].mostrar_sensibles, 1);
+      } finally { await acceso("a", "total", false); }
+    });
+    test("🔴 un archivo enorme se revisa entero: cuenta lo que pasa la severidad y deja constancia de cada equipo fuera", async () => {
       // 23 es de severidad alta para el lector de nmap; los puertos 30000 y siguientes, informativos.
-      const puertos = (ip, desde, n) => `<host><status state="up"/><address addr="${ip}" addrtype="ipv4"/><ports>${Array.from({ length: n }, (_, i) => `<port protocol="tcp" portid="${desde + i}"><state state="open"/></port>`).join("")}</ports></host>`;
+      const puerto = (p) => `<port protocol="tcp" portid="${p}"><state state="open"/></port>`;
+      const puertos = (ip, desde, n, nombre) => `<host><status state="up"/><address addr="${ip}" addrtype="ipv4"/>${nombre ? `<hostnames><hostname name="${nombre}" type="user"/></hostnames>` : ""}<ports>${Array.from({ length: n }, (_, i) => puerto(desde + i)).join("")}</ports></host>`;
       const grande = `<nmaprun>${puertos("10.10.8.1", 23, 1)}${puertos("10.10.8.1", 30000, 20100)}${puertos("8.8.4.9", 30000, 1)}</nmaprun>`;
-      const subir = (severidad_minima) => ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap", severidad_minima }, { archivo: { nombre: "s.xml", contenido: grande } });
+      const subir = (contenido, severidad_minima) => ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap", severidad_minima }, { archivo: { nombre: "s.xml", contenido } });
       const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
-      const r = await subir("high");
+      const r = await subir(grande, "high");
       assert.equal(r.status, 201, r.texto);
       assert.equal(r.json.hallazgos_creados, 1);
       assert.equal(r.json.leidos, 20102);
       assert.equal(r.json.bajo_severidad_minima, 20100);
       assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 1);
-      assert.equal((await subir("info")).status, 413);
+      assert.equal((await subir(grande, "info")).status, 413);
       assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 2);
+      // Un puerto excluido del mismo equipo, al final del archivo, también se detecta.
+      await conAlcance([["cidr", "10.10.0.0/16", 1], ["ip", "10.10.8.1:65000", 0]], async () => {
+        const x = await subir(`<nmaprun>${puertos("10.10.8.1", 30000, 20100)}${puertos("10.10.8.1", 65000, 1)}</nmaprun>`, "high");
+        assert.equal(x.status, 201, x.texto);
+        assert.deepEqual(x.json.hosts_fuera_de_alcance, ["10.10.8.1"]);
+      });
     });
     test("🔴 en lote, un error inesperado no frena al resto", async () => {
       const ids = [];

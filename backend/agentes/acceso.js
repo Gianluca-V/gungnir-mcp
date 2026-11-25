@@ -70,7 +70,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
               (k.ultimo_uso IS NULL OR k.ultimo_uso < NOW() - INTERVAL 1 MINUTE) AS anotar_uso,
               u.id AS user_id, u.username, u.role, u.is_active, u.must_change_password
        FROM agente_keys k JOIN users u ON u.id=k.user_id WHERE k.hash=?`, [hash]);
-    if (!k || !k.is_active || k.revocada || k.vencida) conocidas.delete(hash);
+    if (!k || !k.is_active || k.revocada || k.vencida || k.must_change_password) conocidas.delete(hash);
     if (!k || !k.is_active) return rechazar(req, res, "La key no es válida.");
     if (k.revocada) return rechazar(req, res, "La key fue revocada.");
     if (k.vencida) return rechazar(req, res, "La key está vencida.");

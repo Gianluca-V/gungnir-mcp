@@ -106,8 +106,10 @@ describe("alcance", () => {
         assert.equal(dentro(x, en("domain", x)), true);
         assert.equal(dentro("10.0.0.10", RED, fuera("domain", x)), true, "excluirlo no cierra todo el engagement");
       });
-    for (const x of ["10.0.x", "10.0.xx", "10.x.xxx", "10.0.1-20", "10.0.0–20", "10.0.0.xyz"])
-      test(`${x} sigue siendo ilegible`, () => assert.equal(dentro("10.0.0.10", RED, fuera("domain", x)), false));
+    for (const x of ["10.0.x", "10.0.xx", "10.x.xxx", "10.0.1-20", "10.0.0–20", "10.0.0.xyz",
+      "192.168.xxx", "10.0.xxx", "10.xxx", "10.0.xyz", "172.16.nz", "172.16-31.xxx", "203.0.xxx", "203.0-5.xyz", "10.0.xxx:80", "10.0.xxx/24", "*.10.0.xxx", "http://10.0.xxx/"])
+      for (const tipo of ["domain", "url"])
+        test(`${tipo} ${x} sigue siendo ilegible`, () => assert.equal(dentro("10.0.0.10", RED, fuera(tipo, x)), false));
   });
   test("un nombre sin puntos solo vale si va solo", () => {
     assert.equal(dentro("DC01", en("domain", "DC01")), true);
@@ -238,6 +240,25 @@ describe("ocultamiento", () => {
 });
 
 describe("límite por dirección", () => {
+  test("🔴 una key cuyo dueño tiene que cambiar la contraseña deja de estar eximida", async () => {
+    const k = acceso.nuevaKey();
+    let debeCambiar = 0;
+    const app = require("express")();
+    const a = acceso.crear({
+      qRow: async () => ({ id: "k", nombre: "k", nivel_max: "lectura", user_id: "u", username: "u", role: "admin", is_active: 1, must_change_password: debeCambiar }),
+      qRun: async () => {}, secretoBase: "x", limitePorVentana: 5, // Techo por dirección: 20.
+    });
+    app.get("/", a.limitePorIp, a.autenticar, (req, res) => res.json({ ok: true }));
+    const srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+    try {
+      const pedir = async () => { const r = await fetch(`http://127.0.0.1:${srv.address().port}/`, { headers: { Authorization: `Bearer ${k}` } }); await r.text(); return r.status; };
+      assert.equal(await pedir(), 200);
+      debeCambiar = 1;
+      assert.equal(await pedir(), 403);
+      for (let i = 0; i < 25; i++) await pedir();
+      assert.equal(await pedir(), 429);
+    } finally { srv.closeAllConnections(); srv.close(); }
+  });
   test("🔴 una key que ya entró no queda bloqueada por pedidos sin autenticar de la misma dirección", async () => {
     const buena = acceso.nuevaKey(), hash = acceso.hashDeKey(buena);
     const app = require("express")();
