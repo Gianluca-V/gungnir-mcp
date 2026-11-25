@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Accesos } from './accesos'
 import { useResumenAgentes } from './comun'
 import { Keys } from './keys'
+import { AvisoPausa, BotonPausa } from './pausa'
 import { Propuestas } from './propuestas'
 import { Violaciones } from './violaciones'
 
@@ -15,10 +16,16 @@ export function Agentes() {
   const { data } = useResumenAgentes()
   return (
     <div className='space-y-6'>
-      <div>
-        <h1 className='text-xl font-bold'>{t('agentes.title')}</h1>
-        <p className='text-sm text-muted-foreground'>{t('agentes.subtitle')}</p>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div>
+          <h1 className='text-xl font-bold'>{t('agentes.title')}</h1>
+          <p className='text-sm text-muted-foreground'>
+            {t('agentes.subtitle')}
+          </p>
+        </div>
+        <BotonPausa />
       </div>
+      <AvisoPausa />
       <Tabs defaultValue='propuestas' className='gap-4'>
         <div className='overflow-x-auto'>
           <TabsList>

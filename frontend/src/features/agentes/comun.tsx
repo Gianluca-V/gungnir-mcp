@@ -25,6 +25,7 @@ export interface EngagementAcceso {
   nivel_max: Nivel
   mostrar_sensibles: boolean
   en_alcance: number
+  pausado_en: string | null
 }
 
 export interface KeyAgente {
@@ -67,6 +68,7 @@ export interface Violacion {
 export interface Resumen {
   propuestas: number
   violaciones: number
+  pausa: { desde: string; por: string | null } | null
 }
 
 const NIVEL_CLASE: Record<Nivel, string> = {

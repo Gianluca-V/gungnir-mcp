@@ -28,6 +28,7 @@ import {
   type EngagementAcceso,
   type Nivel,
 } from './comun'
+import { PausaEngagement } from './pausa'
 
 // Solo lo que cambia: una pantalla vieja no puede pisar lo que otra persona acaba de decidir.
 type Cambio = Pick<EngagementAcceso, 'id'> &
@@ -167,6 +168,13 @@ export function Accesos() {
                         <div className='mt-1 text-xs text-muted-foreground'>
                           {t('agentes.access.closed')}
                         </div>
+                      )}
+                      {e.nivel_max !== 'ninguno' && (
+                        <PausaEngagement
+                          id={e.id}
+                          titulo={e.title}
+                          desde={e.pausado_en}
+                        />
                       )}
                     </TableCell>
                     <TableCell>

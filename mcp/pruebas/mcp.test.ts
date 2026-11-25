@@ -69,6 +69,12 @@ describe('cliente', () => {
       assert.equal(n, esperados, String(codigo))
     }
   })
+  test('🔴 en pausa no reintenta y lo dice', async () => {
+    let n = 0
+    manejar = (_req, res) => { n++; json(res, 423, { error: 'Los agentes están en pausa.', pausado: true }) }
+    await assert.rejects(cliente().pedir('POST', '/x'), (e: Error) => e instanceof ErrorGungnir && e.codigo === 423 && /pausa/.test(e.message))
+    assert.equal(n, 1)
+  })
   test('una espera larga no se hace: se informa', async () => {
     manejar = (_q, res) => json(res, 429, { error: 'límite' }, { 'Retry-After': '600' })
     await assert.rejects(cliente().pedir('GET', '/x'), /límite/)
@@ -245,6 +251,8 @@ describe('servidor MCP', () => {
     const r = await c.getPrompt({ name: 'escaneo', arguments: { engagement: E1 } })
     const t = (r.messages[0]!.content as { text: string }).text
     assert.ok(t.includes(E1) && t.includes('verificar_alcance'))
+    assert.match(t, /pausa[\s\S]*terminal/)
+    assert.match(c.getInstructions() ?? '', /pausa[\s\S]*terminal/)
   })
   test('🔴 los prompts solo nombran herramientas que existen', async () => {
     const { c } = await armar(() => ({}))

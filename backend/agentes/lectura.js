@@ -55,7 +55,7 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
 
   router.get("/engagements", ruta(async (req, res) => {
     const filas = await qRows(
-      `SELECT e.id, e.title, e.type, e.methodology, e.status, e.current_phase, ae.nivel_max, ae.mostrar_sensibles, ${CAMPOS_CLIENTE}
+      `SELECT e.id, e.title, e.type, e.methodology, e.status, e.current_phase, ae.nivel_max, ae.mostrar_sensibles, ae.pausado_en, ${CAMPOS_CLIENTE}
        FROM engagements e
        JOIN agente_key_engagements ke ON ke.engagement_id=e.id AND ke.key_id=?
        JOIN agente_engagements ae ON ae.engagement_id=e.id AND ae.nivel_max<>'ninguno'
@@ -63,7 +63,7 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
     const datos = filas.map((f) => {
       const { id, title, type, methodology, status, current_phase } = f;
       const o = acceso.ocultador({ engagementId: id, nombres: nombresDe(f), activo: !f.mostrar_sensibles });
-      return { ...o.objeto({ id, title, type, methodology, status, current_phase }), nivel_efectivo: N.efectivo(req.agente.nivelMax, f.nivel_max, N.techoDeEstado(status)) };
+      return { ...o.objeto({ id, title, type, methodology, status, current_phase }), nivel_efectivo: N.efectivo(req.agente.nivelMax, f.nivel_max, N.techoDeEstado(status)), pausado: Boolean(f.pausado_en) };
     });
     res.json({ contenido_no_confiable: true, datos });
   }));

@@ -47,6 +47,16 @@ async function crearTablas({ qRun }) {
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 
+  // Una sola fila (id 1). Con pausado_en, ninguna key de agente hace nada.
+  await qRun(`CREATE TABLE IF NOT EXISTS agente_pausa (
+    id TINYINT PRIMARY KEY,
+    pausado_en DATETIME NULL,
+    pausado_por VARCHAR(36) NULL
+  ) ${FIN}`);
+  await qRun("INSERT IGNORE INTO agente_pausa (id) VALUES (1)");
+  await agregarColumna(qRun, "ALTER TABLE agente_engagements ADD COLUMN pausado_en DATETIME NULL");
+  await agregarColumna(qRun, "ALTER TABLE agente_engagements ADD COLUMN pausado_por VARCHAR(36) NULL");
+
   // Las propuestas no van en `findings`: así no aparecen en informes, exportaciones ni conteos hasta
   // que una persona las aprueba.
   await qRun(`CREATE TABLE IF NOT EXISTS agente_propuestas (

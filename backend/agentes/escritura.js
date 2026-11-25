@@ -67,6 +67,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     try {
       r = await transaccion(async (tx) => {
         const out = await fn(req, tx);
+        await acceso.exigirSinPausa(tx, req.engagement.id);
         if (clave) await tx.qRun("UPDATE agente_idempotencia SET lista=1, codigo=?, respuesta=? WHERE key_id=? AND clave=?", [out.codigo, JSON.stringify(out.cuerpo), req.agente.keyId, clave]);
         return out;
       });

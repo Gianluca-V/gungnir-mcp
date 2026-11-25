@@ -11,6 +11,7 @@ const { nuevaKey, hashDeKey } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero } = require("./comun");
 
 const ESCRIBEN = ["admin", "auditor", "pentester"];
+const ADMINISTRAN = ["admin", "auditor"];
 const DIAS_POR_DEFECTO = 30;
 const DIAS_MAX = 365;
 
@@ -102,14 +103,14 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
   app.get("/api/agentes/engagements", auth(), ruta(async (req, res) => {
     const filas = await qRows(
       `SELECT e.id, e.title, e.status, c.name AS client_name, COALESCE(ae.nivel_max,'ninguno') AS nivel_max,
-              COALESCE(ae.mostrar_sensibles,0) AS mostrar_sensibles,
+              COALESCE(ae.mostrar_sensibles,0) AS mostrar_sensibles, ae.pausado_en,
               (SELECT COUNT(*) FROM scope_items s WHERE s.engagement_id=e.id AND s.in_scope=1) AS en_alcance
        FROM engagements e JOIN clients c ON c.id=e.client_id LEFT JOIN agente_engagements ae ON ae.engagement_id=e.id
        ORDER BY e.updated_at DESC`);
     res.json(filas.map((f) => ({ ...f, mostrar_sensibles: Boolean(f.mostrar_sensibles) })));
   }));
 
-  app.put("/api/agentes/engagements/:id", auth(["admin", "auditor"]), ruta(async (req, res) => {
+  app.put("/api/agentes/engagements/:id", auth(ADMINISTRAN), ruta(async (req, res) => {
     // Cada dato se cambia por separado: guardar uno con una pantalla vieja no puede pisar el otro.
     const nivel = req.body.nivel_max === undefined ? null : opcion(req.body.nivel_max, "nivel_max", N.NIVELES, { obligatorio: true });
     let sensibles = req.body.mostrar_sensibles;
@@ -138,11 +139,41 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     res.json({ ok: true });
   }));
 
+  // ── Pausa ───────────────────────────────────────────────────────────────────
+  // Frenar lo hace cualquiera que decida sobre los agentes; reanudar, quien administra accesos.
+  function pedidoDePausa(req) {
+    const { pausado } = req.body || {};
+    if (typeof pausado !== "boolean") throw new ErrorHttp(400, `"pausado" tiene que ser verdadero o falso.`);
+    if (!pausado && !ADMINISTRAN.includes(req.user.role)) throw new ErrorHttp(403, "Reanudar lo hace un admin o un auditor.");
+    return pausado;
+  }
+  app.post("/api/agentes/pausa", auth(ESCRIBEN), ruta(async (req, res) => {
+    const pausado = pedidoDePausa(req);
+    await qRun(
+      `INSERT INTO agente_pausa (id,pausado_en,pausado_por) VALUES (1,IF(?,NOW(),NULL),?)
+       ON DUPLICATE KEY UPDATE pausado_por=IF(?,COALESCE(pausado_por,?),NULL), pausado_en=IF(?,COALESCE(pausado_en,NOW()),NULL)`,
+      [pausado, pausado ? req.user.id : null, pausado, req.user.id, pausado]);
+    await anotar(req, pausado ? "agente_pausa" : "agente_reanudar", "agentes", null, "Todos los agentes");
+    res.json({ ok: true, pausado });
+  }));
+  app.post("/api/agentes/engagements/:id/pausa", auth(ESCRIBEN), ruta(async (req, res) => {
+    const pausado = pedidoDePausa(req);
+    const e = await qRow("SELECT id, title FROM engagements WHERE id=?", [req.params.id]);
+    if (!e) throw new ErrorHttp(404, "El engagement no existe.");
+    const [r] = await qRun(
+      `UPDATE agente_engagements SET pausado_por=IF(?,COALESCE(pausado_por,?),NULL), pausado_en=IF(?,COALESCE(pausado_en,NOW()),NULL)
+       WHERE engagement_id=?`, [pausado, req.user.id, pausado, e.id]);
+    if (!r.affectedRows) throw new ErrorHttp(409, "El engagement no tiene acceso de agentes: no hay nada que pausar.");
+    await anotar(req, pausado ? "agente_pausa" : "agente_reanudar", "engagements", e.id, e.title);
+    res.json({ ok: true, pausado });
+  }));
+
   // ── Resumen para avisos ─────────────────────────────────────────────────────
   app.get("/api/agentes/resumen", auth(), ruta(async (req, res) => {
     const p = await qRow("SELECT COUNT(*) AS n FROM agente_propuestas WHERE estado='pendiente'");
     const v = await qRow("SELECT COUNT(*) AS n FROM agente_violaciones WHERE revisada_en IS NULL");
-    res.json({ propuestas: Number(p.n), violaciones: Number(v.n) });
+    const g = await qRow("SELECT p.pausado_en, u.username FROM agente_pausa p LEFT JOIN users u ON u.id=p.pausado_por WHERE p.id=1");
+    res.json({ propuestas: Number(p.n), violaciones: Number(v.n), pausa: g?.pausado_en ? { desde: g.pausado_en, por: g.username } : null });
   }));
 
   // ── Propuestas ──────────────────────────────────────────────────────────────

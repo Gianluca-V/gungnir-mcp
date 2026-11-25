@@ -636,6 +636,125 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("pausa", () => {
+    const pausar = (rol, pausado, e) => panel(rol, "POST", e ? `/engagements/${E[e]}/pausa` : "/pausa", { pausado });
+    const reanudarTodo = async () => { await pausar("admin", false); await pausar("admin", false, "a"); };
+    test("🔴 la pausa global corta lectura y escritura de todas las keys, y al reanudar vuelven", async () => {
+      try {
+        assert.equal((await pausar("pentester", true)).status, 200);
+        for (const [k, m, r, b] of [["lectura", "GET", "/yo"], ["lectura", "GET", "/arsenal"], ["total", "GET", `/engagements/${E.a}`], ["escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo()]]) {
+          const x = await ag(k, m, r, b);
+          assert.equal(x.status, 423, `${m} ${r}`);
+          assert.equal(x.json.pausado, true);
+          assert.match(x.json.error, /pausa/);
+        }
+        const s = (await panel("lector", "GET", "/resumen")).json;
+        assert.equal(s.pausa.por, `pentester-${suf}`);
+        assert.ok(s.pausa.desde);
+      } finally { await reanudarTodo(); }
+      assert.equal((await ag("lectura", "GET", "/yo")).status, 200);
+      assert.equal((await panel("lector", "GET", "/resumen")).json.pausa, null);
+    });
+    test("🔴 la pausa de un engagement no afecta a los demás, y no revela uno ajeno", async () => {
+      await acceso("b", "total");
+      try {
+        assert.equal((await pausar("pentester", true, "a")).status, 200);
+        assert.equal((await ag("total", "GET", `/engagements/${E.a}`)).status, 423);
+        assert.equal((await ag("total", "GET", "/yo")).status, 200);
+        assert.equal((await ag("delB", "GET", `/engagements/${E.b}`)).status, 200);
+        assert.equal((await ag("delB", "GET", `/engagements/${E.a}`)).status, 404);
+        assert.equal((await ag("total", "GET", "/engagements")).json.datos.find((e) => e.id === E.a).pausado, true);
+        assert.ok((await panel("lector", "GET", "/engagements")).json.find((e) => e.id === E.a).pausado_en);
+      } finally { await reanudarTodo(); await acceso("b", "ninguno"); }
+      assert.equal((await ag("total", "GET", `/engagements/${E.a}`)).status, 200);
+    });
+    test("🔴 pausa quien decide y reanuda quien administra accesos", async () => {
+      try {
+        assert.equal((await pausar("lector", true)).status, 403);
+        assert.equal((await pausar("pentester", true)).status, 200);
+        assert.equal((await pausar("pentester", true, "a")).status, 200);
+        assert.equal((await pausar("pentester", false)).status, 403);
+        assert.equal((await pausar("pentester", false, "a")).status, 403);
+        assert.equal((await ag("total", "POST", "/pausa", { pausado: false })).status, 423);
+        assert.notEqual((await pedir("POST", "/api/agentes/pausa", { bearer: keys.total, body: { pausado: false } })).status, 200);
+        assert.ok((await panel("lector", "GET", "/resumen")).json.pausa);
+        assert.equal((await pausar("auditor", false)).status, 200);
+        assert.equal((await pausar("auditor", false, "a")).status, 200);
+      } finally { await reanudarTodo(); }
+    });
+    test("🔴 confirmada la pausa, una escritura que ya estaba en curso no se guarda", async () => {
+      for (const e of [undefined, "a"]) {
+        const titulo = `En curso ${uid()}`, clave = { headers: { "Idempotency-Key": uid() } };
+        const cuerpo = hallazgo({ title: titulo });
+        const con = await pool.getConnection();
+        try {
+          await con.beginTransaction();
+          await con.query("SELECT id FROM engagements WHERE id=? FOR UPDATE", [E.a]);
+          const enVuelo = ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, cuerpo, clave);
+          await new Promise((ok) => setTimeout(ok, 300));
+          assert.equal((await pausar("pentester", true, e)).status, 200);
+          await con.commit();
+          const r = await enVuelo;
+          assert.equal(r.status, 423, r.texto);
+          assert.equal(await contar("findings", "title=?", [titulo]), 0);
+        } finally { await con.rollback(); con.release(); await reanudarTodo(); }
+        const r = await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, cuerpo, clave);
+        assert.equal(r.status, 201, r.texto); // La clave quedó libre para reintentar.
+      }
+    });
+    test("🔴 tampoco si la transacción ya había leído antes de la pausa", async () => {
+      const titulo = `lenta ${uid()}`;
+      await sql("CREATE TRIGGER alta_lenta BEFORE INSERT ON findings FOR EACH ROW BEGIN IF NEW.title LIKE 'lenta%' THEN DO SLEEP(0.8); END IF; END");
+      try {
+        const enVuelo = ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ title: titulo }));
+        await new Promise((ok) => setTimeout(ok, 300));
+        assert.equal((await pausar("pentester", true)).status, 200);
+        assert.equal((await enVuelo).status, 423);
+        assert.equal(await contar("findings", "title=?", [titulo]), 0);
+      } finally { await reanudarTodo(); await sql("DROP TRIGGER IF EXISTS alta_lenta"); }
+    });
+    test("🔴 una subida pausada a mitad no deja el archivo en disco", async () => {
+      const carpeta = path.join(BACKEND, "..", "uploads"), antes = fs.readdirSync(carpeta).length;
+      const con = await pool.getConnection();
+      try {
+        await con.beginTransaction();
+        await con.query("SELECT id FROM engagements WHERE id=? FOR UPDATE", [E.a]);
+        const x = ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap" }, { archivo: { nombre: "s.xml", contenido: `<nmaprun><host><status state="up"/><address addr="10.10.9.9" addrtype="ipv4"/><ports><port protocol="tcp" portid="99"><state state="open"/></port></ports></host></nmaprun>` } });
+        await new Promise((ok) => setTimeout(ok, 300));
+        assert.equal((await pausar("pentester", true)).status, 200);
+        await con.commit();
+        assert.equal((await x).status, 423);
+      } finally { await con.rollback(); con.release(); await reanudarTodo(); }
+      assert.equal(fs.readdirSync(carpeta).length, antes);
+    });
+    test("pausar no cambia niveles ni keys, queda auditado y valida lo que recibe", async () => {
+      const acc = () => sql("SELECT nivel_max, mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]);
+      const antes = await acc();
+      try {
+        assert.equal((await pausar("pentester", true)).status, 200);
+        assert.equal((await pausar("pentester", true, "a")).status, 200);
+        assert.deepEqual(await acc(), antes);
+        await acceso("a", "total"); // Cambiar el nivel de algo pausado no lo reanuda.
+        assert.equal((await pausar("admin", false)).status, 200);
+        assert.equal((await ag("total", "GET", `/engagements/${E.a}`)).status, 423);
+      } finally { await reanudarTodo(); }
+      assert.ok(await contar("audit_logs", "action='agente_pausa' AND username=?", [`pentester-${suf}`]) >= 2);
+      for (const b of [{}, { pausado: "si" }, { pausado: 1 }]) assert.equal((await panel("admin", "POST", "/pausa", b)).status, 400);
+      assert.equal((await panel("admin", "POST", `/engagements/${uid()}/pausa`, { pausado: true })).status, 404);
+      await sql("DELETE FROM agente_engagements WHERE engagement_id=?", [E.b]);
+      assert.equal((await pausar("admin", true, "b")).status, 409, "sin acceso no hay nada que pausar");
+    });
+    test("🔴 los pedidos en pausa gastan el cupo de la key: insistir no es gratis", async () => {
+      try {
+        const antes = Number((await ag("lectura", "GET", "/yo")).headers.get("ratelimit-remaining"));
+        assert.equal((await pausar("admin", true)).status, 200);
+        const r = await ag("lectura", "GET", "/yo");
+        assert.equal(r.status, 423);
+        assert.equal(Number(r.headers.get("ratelimit-remaining")), antes - 1);
+      } finally { await reanudarTodo(); }
+    });
+  });
+
   describe("importación", () => {
     const host = (ip, puerto, servicio = "http") => `<host><status state="up"/><address addr="${ip}" addrtype="ipv4"/><ports><port protocol="tcp" portid="${puerto}"><state state="open"/><service name="${servicio}"/></port></ports></host>`;
     const xml = (...h) => `<?xml version="1.0"?><nmaprun>${h.join("")}</nmaprun>`;

@@ -2190,6 +2190,19 @@
     "notice": "Agentes: {{propuestas}} propuestas y {{violaciones}} acciones fuera de alcance por revisar",
     "load_error": "No se pudieron cargar los datos.",
     "retry": "Reintentar",
+    "pause": {
+      "all": "Pausar agentes",
+      "all_title": "¿Pausar todos los agentes?",
+      "all_desc": "Ninguna key va a poder leer ni escribir en Gungnir hasta que un admin o un auditor reanude. No detiene lo que un agente ya esté corriendo en su terminal.",
+      "active_title": "Agentes en pausa",
+      "active_desc": "Ninguna key puede leer ni escribir. Los pausó {{user}} el {{date}}. Lo que ya corra en una terminal sigue hasta que lo cortes ahí.",
+      "who_resumes": "Reanuda un admin o un auditor.",
+      "resume": "Reanudar",
+      "one": "Pausar",
+      "since": "En pausa desde el {{date}}",
+      "paused_ok": "Pausa aplicada",
+      "resumed_ok": "Agentes reanudados"
+    },
     "level": {
       "ninguno": "Sin acceso",
       "lectura": "Lectura",

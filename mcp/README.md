@@ -91,6 +91,8 @@ Vale el más restrictivo entre la key, el engagement, el rol de quien creó la k
 | Escritura | Además, crear y modificar hallazgos, metodología y técnicas |
 | Total | Además, borrar hallazgos, logs y evidencias |
 
+**Pausa.** Desde Integraciones > Agentes se frena a todos los agentes o a un engagement. Corta lectura y escritura (error 423) sin tocar niveles ni keys; confirmada, no se guarda ninguna escritura más. Pausa un admin, auditor o pentester; reanuda un admin o auditor. No detiene lo que un agente ya corra en su terminal.
+
 Ningún nivel permite cambiar el alcance, aprobar propuestas, ni administrar usuarios, configuración o keys.
 
 ## Herramientas

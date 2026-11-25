@@ -2190,6 +2190,19 @@
     "notice": "Agents: {{propuestas}} proposals and {{violaciones}} out-of-scope actions to review",
     "load_error": "The data could not be loaded.",
     "retry": "Retry",
+    "pause": {
+      "all": "Pause agents",
+      "all_title": "Pause every agent?",
+      "all_desc": "No key will be able to read or write in Gungnir until an admin or auditor resumes. It does not stop what an agent is already running in its terminal.",
+      "active_title": "Agents paused",
+      "active_desc": "No key can read or write. Paused by {{user}} on {{date}}. Anything already running in a terminal continues until you stop it there.",
+      "who_resumes": "An admin or auditor can resume.",
+      "resume": "Resume",
+      "one": "Pause",
+      "since": "Paused since {{date}}",
+      "paused_ok": "Pause applied",
+      "resumed_ok": "Agents resumed"
+    },
     "level": {
       "ninguno": "No access",
       "lectura": "Read",
