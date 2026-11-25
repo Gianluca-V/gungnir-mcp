@@ -32,7 +32,7 @@ function recortarObjeto(o, max) {
 }
 const palabras = (q) => String(q || "").toLocaleLowerCase("es").split(/\s+/).filter(Boolean).slice(0, 10);
 
-function montar(router, { acceso, qRow, qRows, buscarCve }) {
+function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
   const con = acceso.conEngagement;
   /** Responde datos guardados: primero se oculta y después se recorta, para no dejar secretos a medias. */
   const entregar = (req, res, datos, { max = LARGO_CAMPO, ...extra } = {}) => {
@@ -208,7 +208,8 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
   router.get("/cve/:cve", ruta(async (req, res) => {
     const cve = String(req.params.cve).toUpperCase();
     if (!/^CVE-\d{4}-\d{4,7}$/.test(cve)) throw new ErrorHttp(400, "El formato es CVE-AAAA-NNNN.");
-    entregar(req, res, await buscarCve(cve));
+    const datos = await buscarCve(cve);
+    entregar(req, res, { ...datos, explotacion: await explotacion(cve, datos.severity) });
   }));
 }
 

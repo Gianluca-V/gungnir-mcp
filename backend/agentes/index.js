@@ -37,7 +37,7 @@ function montar(app, deps) {
 
   const router = express.Router();
   router.use(acceso.limitePorIp, actividad.crear({ qRun }).registrar, acceso.autenticar, acceso.limitePorKey, acceso.sinPausa);
-  lectura.montar(router, { ...deps, acceso, buscarCve: cve.crear() });
+  lectura.montar(router, { ...deps, acceso, buscarCve: cve.crear(), explotacion: cve.crearExplotacion({ qRow }) });
   escritura.montar(router, { ...deps, acceso, notificar });
   router.use((req, res) => res.status(404).json({ error: "Ruta inexistente." }));
   app.use(BASE, router);

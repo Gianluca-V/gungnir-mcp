@@ -45,7 +45,7 @@ Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resol
   fase('reporte', 'Reporte', 'Completar y ordenar los hallazgos',
     `Dejá los hallazgos listos para el informe.
 1. listar_registros (tipo "hallazgos") y ver_hallazgo en cada uno.
-2. Completá descripción, pasos, recomendación, CVSS y CWE. Usá consultar_cve y buscar_plantillas.
+2. Completá descripción, pasos, recomendación, CVSS y CWE. Usá consultar_cve y buscar_plantillas; ordená por su prioridad.
 3. Revisá la cobertura con ver_metodologia.
 4. Listá duplicados, hallazgos sin evidencia y propuestas pendientes. El PDF se genera desde el panel.`),
 ]

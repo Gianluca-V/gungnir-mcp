@@ -158,7 +158,7 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
       return cliente.pedir('GET', `/plantillas/${id}`)
     })
 
-  herramienta('consultar_cve', 'Consultar CVE', 'Datos de un CVE en NVD: descripción, CVSS y CWE.', { cve: z.string().regex(/^CVE-\d{4}-\d{4,7}$/i) }, { readOnlyHint: true, openWorldHint: true },
+  herramienta('consultar_cve', 'Consultar CVE', 'Datos de un CVE: descripción, CVSS y CWE (NVD), si se explota hoy (KEV), probabilidad de que se explote (EPSS) y prioridad. null es desconocido.', { cve: z.string().regex(/^CVE-\d{4}-\d{4,7}$/i) }, { readOnlyHint: true, openWorldHint: true },
     async (a) => cliente.pedir('GET', `/cve/${a.cve.toUpperCase()}`))
 
   // ── Escritura ───────────────────────────────────────────────────────────────

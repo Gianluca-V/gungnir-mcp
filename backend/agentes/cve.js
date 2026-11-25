@@ -1,10 +1,24 @@
 "use strict";
-/** Consulta de un CVE en NVD, con memoria de un día. El host es fijo: del agente solo llega el CVE, ya validado. */
+/**
+ * Consulta de un CVE en NVD, con memoria de un día, y si se está explotando: KEV (CISA) y EPSS (FIRST).
+ * Los hosts son fijos: del agente solo llega el CVE, ya validado.
+ */
 const { httpRequest, parseJSON } = require("../integrations/http");
+const E = require("../vulnerabilidades-enriquecimiento");
+const P = require("../vulnerabilidades-prioridad");
 const { ErrorHttp } = require("./comun");
 
 const VIGENCIA = 24 * 60 * 60 * 1000;
 const TOPE = 500;
+const EPSS_VIEJO = 7 * VIGENCIA;
+const EPSS_REINTENTO = 10 * 60 * 1000;
+const EPSS_TIEMPO = 8000;
+
+/** Guarda sin pasarse del tope: sale el más viejo. */
+function recordar(memoria, clave, valor) {
+  if (memoria.size >= TOPE && !memoria.has(clave)) memoria.delete(memoria.keys().next().value);
+  memoria.set(clave, valor);
+}
 
 function resumir(cve, c) {
   const metrica = [...(c.metrics?.cvssMetricV31 ?? []), ...(c.metrics?.cvssMetricV30 ?? [])][0]?.cvssData;
@@ -38,10 +52,55 @@ function crear({ pedir = httpRequest, ahora = Date.now } = {}) {
     const c = lista[0]?.cve;
     if (!c) throw new ErrorHttp(404, `${cve} no está en NVD.`);
     const datos = resumir(cve, c);
-    if (memoria.size >= TOPE) memoria.delete(memoria.keys().next().value);
-    memoria.set(cve, { t: ahora(), datos });
+    recordar(memoria, cve, { t: ahora(), datos });
     return datos;
   };
 }
 
-module.exports = { crear };
+/**
+ * Si un CVE se está explotando. KEV sale del catálogo que Gungnir baja cada día; EPSS, de lo guardado o de
+ * FIRST si falta o quedó viejo. Nunca lanza: lo que no se sabe va como null, con un aviso.
+ */
+function crearExplotacion({ qRow, descargar = E.descargarTexto, habilitada = E.habilitada, ahora = Date.now }) {
+  const memoria = new Map();
+
+  async function deFirst(cve) {
+    const m = memoria.get(cve);
+    if (m && ahora() - m.t < (m.fallo ? EPSS_REINTENTO : VIGENCIA)) return m;
+    let r;
+    try {
+      r = { t: ahora(), dato: P.parsearEpss(await descargar(`${E.URL_EPSS}?cve=${encodeURIComponent(cve)}`, { timeout: EPSS_TIEMPO, maxBytes: 200000 })).find((x) => x.cve === cve) ?? null };
+    } catch { r = { t: ahora(), dato: null, fallo: true }; }
+    recordar(memoria, cve, r);
+    return r;
+  }
+  async function epssDe(cve) {
+    const g = await qRow("SELECT epss, percentil, fecha, actualizado FROM vuln_epss WHERE cve=?", [cve]);
+    const guardado = g && { epss: Number(g.epss), percentil: g.percentil == null ? null : Number(g.percentil), fecha: P.ymd(g.fecha) };
+    if (guardado && ahora() - new Date(g.actualizado).getTime() < EPSS_VIEJO) return { dato: guardado };
+    if (!habilitada()) return { dato: guardado, fallo: !guardado };
+    const r = await deFirst(cve);
+    return { dato: r.dato ?? guardado, fallo: r.fallo && !guardado };
+  }
+  async function kevDe(cve) {
+    const k = await qRow("SELECT alta, vence, ransomware FROM vuln_kev WHERE cve=?", [cve]);
+    if (k) return k;
+    return Number((await qRow("SELECT COUNT(*) AS n FROM vuln_kev"))?.n) > 0 ? false : null;
+  }
+
+  return async function explotacion(cve, severidad) {
+    const avisos = [];
+    const [k, e] = await Promise.all([kevDe(cve).catch(() => null), epssDe(cve).catch(() => ({ dato: null, fallo: true }))]);
+    if (k === null) avisos.push("No se sabe si está en KEV: el catálogo no está disponible en esta instalación.");
+    if (e.fallo) avisos.push("No se pudo obtener EPSS.");
+    const epss = e.dato?.epss ?? null;
+    return {
+      kev: k === null ? null : Boolean(k), ...(k ? { kev_desde: P.ymd(k.alta), kev_vence: P.ymd(k.vence), ransomware: Boolean(Number(k.ransomware)) } : {}),
+      epss, epss_percentil: e.dato?.percentil ?? null, epss_fecha: e.dato?.fecha ?? null,
+      prioridad: k || severidad ? P.prioridad({ severidad, epss, kev: k ? 1 : 0 }) : null,
+      ...(avisos.length ? { avisos } : {}),
+    };
+  };
+}
+
+module.exports = { crear, crearExplotacion };

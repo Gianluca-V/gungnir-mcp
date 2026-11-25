@@ -1076,6 +1076,58 @@ describe("CVE", () => {
     const r = await buscar("CVE-2024-1234"); await buscar("CVE-2024-1234");
     assert.equal(n, 1); assert.equal(r.cvss_vector_31, "AV:N"); assert.equal(r.severity, "critical"); assert.equal(r.cwe_id, "CWE-79");
   });
+  describe("explotación: KEV y EPSS", () => {
+    const base = ({ kev = null, epss = null, catalogo = 1500 } = {}) => async (q) =>
+      (/COUNT/.test(q) ? { n: catalogo } : /vuln_kev/.test(q) ? kev : /vuln_epss/.test(q) ? epss : assert.fail(q));
+    const first = (epss, percentile = 0.9) => JSON.stringify({ data: [{ cve: "CVE-2024-1234", epss: String(epss), percentile: String(percentile), date: "2026-11-20" }] });
+    const crear = (b, x = {}) => cve.crearExplotacion({ qRow: base(b), descargar: async () => assert.fail("no debía salir a la red"), habilitada: () => true, ...x });
+    const HOY = new Date();
+    test("🔴 lo que está en KEV es urgente y trae sus fechas", async () => {
+      const r = await crear({ kev: { alta: "2024-02-01", vence: "2024-02-22", ransomware: 1 }, epss: { epss: "0.94000", percentil: "0.99900", fecha: "2026-11-20", actualizado: HOY } })("CVE-2024-1234", "low");
+      assert.deepEqual(r, { kev: true, kev_desde: "2024-02-01", kev_vence: "2024-02-22", ransomware: true, epss: 0.94, epss_percentil: 0.999, epss_fecha: "2026-11-20", prioridad: "urgente" });
+    });
+    test("fuera de KEV, la prioridad sale de la severidad y el EPSS", async () => {
+      for (const [sev, e, p] of [["critical", 0.6, "urgente"], ["critical", 0.01, "alta"], ["high", 0.2, "alta"], ["high", 0.01, "media"], ["low", 0.01, "baja"], ["medium", 0.7, "alta"]]) {
+        const r = await crear({ epss: { epss: e, percentil: 0.5, fecha: "2026-11-20", actualizado: HOY } })("CVE-2024-1234", sev);
+        assert.equal(r.kev, false); assert.equal(r.prioridad, p, `${sev} ${e}`);
+      }
+    });
+    test("🔴 sin el catálogo descargado no dice que no está explotada", async () => {
+      const r = await crear({ catalogo: 0, epss: { epss: 0.1, percentil: 0.5, fecha: null, actualizado: HOY } })("CVE-2024-1234", "high");
+      assert.equal(r.kev, null); assert.match(r.avisos[0], /KEV/);
+    });
+    test("🔴 si falta EPSS lo pide a FIRST, lo recuerda y no repite", async () => {
+      let n = 0, url;
+      const f = crear({}, { descargar: async (u) => { n++; url = u; return first(0.42); } });
+      const r = await f("CVE-2024-1234", "high"); await f("CVE-2024-1234", "high");
+      assert.equal(n, 1); assert.equal(r.epss, 0.42); assert.equal(r.epss_fecha, "2026-11-20"); assert.equal(r.prioridad, "alta");
+      assert.match(url, /^https:\/\/api\.first\.org\/data\/v1\/epss\?cve=CVE-2024-1234$/);
+    });
+    test("🔴 sin red o apagado sigue respondiendo: EPSS desconocido, con aviso, sin insistir", async () => {
+      let n = 0;
+      const f = crear({}, { descargar: async () => { n++; throw new Error("sin red"); } });
+      for (let i = 0; i < 3; i++) { const r = await f("CVE-2024-1234", "high"); assert.equal(r.epss, null); assert.match(r.avisos[0], /EPSS/); assert.equal(r.prioridad, "media"); }
+      assert.equal(n, 1);
+      const a = await crear({}, { habilitada: () => false })("CVE-2024-1234", "high");
+      assert.equal(a.epss, null); assert.match(a.avisos[0], /EPSS/);
+    });
+    test("un EPSS guardado hace mucho se renueva, y si no se puede vale el guardado", async () => {
+      const viejo = { epss: 0.2, percentil: 0.5, fecha: "2026-01-01", actualizado: new Date(Date.now() - 30 * 864e5) };
+      assert.equal((await crear({ epss: viejo }, { descargar: async () => first(0.8) })("CVE-2024-1234", "high")).epss, 0.8);
+      assert.equal((await crear({ epss: viejo }, { descargar: async () => { throw new Error("x"); } })("CVE-2024-1234", "high")).epss, 0.2);
+    });
+    test("un CVE sin puntaje en FIRST no es un error, y sin severidad no se inventa prioridad", async () => {
+      const r = await crear({}, { descargar: async () => '{"data":[]}' })("CVE-2024-1234", null);
+      assert.equal(r.epss, null); assert.equal(r.prioridad, null); assert.equal(r.avisos, undefined);
+    });
+    test("🔴 si la base falla, no se cae la consulta: se informa desconocido", async () => {
+      const r = await crear({}, { qRow: async () => { throw new Error("db"); } })("CVE-2024-1234", "high");
+      assert.equal(r.kev, null); assert.equal(r.epss, null); assert.ok(r.avisos.length >= 1);
+    });
+    test("KEV sin severidad es urgente igual", async () => {
+      assert.equal((await crear({ kev: { alta: null, vence: null, ransomware: 0 }, epss: { epss: 0.1, percentil: null, fecha: null, actualizado: HOY } })("CVE-2024-1234", null)).prioridad, "urgente");
+    });
+  });
   test("traduce los errores de NVD", async () => {
     for (const [status, data, codigo] of [[429, "", 503], [403, "", 503], [500, "", 503], [404, "", 404], [200, '{"vulnerabilities":[]}', 404], [200, "<html>mantenimiento</html>", 503], [200, "{}", 503]])
       await assert.rejects(cve.crear({ pedir: async () => ({ status, data }) })("CVE-2024-1234"), (e) => e.codigo === codigo);
