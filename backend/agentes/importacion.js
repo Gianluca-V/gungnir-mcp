@@ -7,7 +7,7 @@
 const { PARSERS } = require("../importacion-escaneres");
 const formatos = require("../vulnerabilidades-formatos");
 const { SEVERIDADES } = require("./hallazgos");
-const { evaluar } = require("./alcance");
+const { evaluador } = require("./alcance");
 const { ErrorHttp } = require("./comun");
 
 const FORMATOS = [...Object.keys(PARSERS), "nuclei"];
@@ -26,9 +26,16 @@ function leer(formato, contenido) {
 }
 
 const corto = (v, n) => (v == null || v === "" ? null : String(v).slice(0, n));
-function aHallazgo(c) {
-  const host = c._ip || c._hostname;
-  const activo = c._puerto ? `${host.includes(":") ? `[${host}]` : host}:${c._puerto}${/^(tcp|udp|sctp)$/i.test(c._protocolo || "") ? `/${c._protocolo.toLowerCase()}` : ""}` : host;
+const conPuerto = (host, c) =>
+  (c._puerto ? `${host.includes(":") ? `[${host}]` : host}:${c._puerto}${/^(tcp|udp|sctp)$/i.test(c._protocolo || "") ? `/${c._protocolo.toLowerCase()}` : ""}` : host);
+
+/** Las formas de nombrar lo que se encontró, de la más precisa a la menos. */
+function activosDe(c) {
+  const url = [c._ubicacion, c.affected_asset].find((x) => /^https?:\/\/\S{1,480}$/i.test(x || ""));
+  return [url, ...[c._ip, c._hostname].filter(Boolean).map((h) => conPuerto(h, c))].filter(Boolean);
+}
+
+function aHallazgo(c, activo) {
   const puntaje = Number(c.cvss_score_31);
   return {
     title: corto(c.title, 500), affected_asset: activo, severity: SEVERIDADES.includes(c.severity) ? c.severity : "medium",
@@ -40,15 +47,18 @@ function aHallazgo(c) {
 /** Separa lo importable de lo que queda fuera de alcance o por debajo de la severidad pedida. */
 function clasificar(crudos, items, minima) {
   const aceptados = [], fuera = new Map();
+  const evaluar = evaluador(items);
   let bajoMinimo = 0;
   for (const c of crudos) {
-    const hosts = [c._ip, c._hostname].filter(Boolean);
-    if (!hosts.length) { fuera.set("(sin equipo)", "El resultado no dice a qué equipo corresponde."); continue; }
-    // Alcanza con que la IP o el nombre estén dentro, siempre que ninguno esté excluido.
-    const r = hosts.map((h) => evaluar(h, items));
+    const activos = activosDe(c);
+    if (!activos.length) { fuera.set("(sin equipo)", "El resultado no dice a qué equipo corresponde."); continue; }
+    // El activo que se guarda es el que está en alcance, con su puerto o su ruta. Alcanza con una forma
+    // (URL, IP o nombre), siempre que ninguna esté excluida.
+    const r = activos.map((a) => evaluar(a));
     const excluido = r.find((x) => x.excluido);
-    if (excluido || !r.some((x) => x.dentro)) { fuera.set(hosts[0], (excluido || r[0]).motivo); continue; }
-    const h = aHallazgo(c);
+    const i = r.findIndex((x) => x.dentro);
+    if (excluido || i < 0) { fuera.set(c._ip || c._hostname || activos[0], (excluido || r[0]).motivo); continue; }
+    const h = aHallazgo(c, activos[i]);
     if (SEVERIDADES.indexOf(h.severity) > SEVERIDADES.indexOf(minima)) { bajoMinimo++; continue; }
     aceptados.push(h);
   }

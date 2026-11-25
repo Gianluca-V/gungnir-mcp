@@ -28,11 +28,15 @@ function textosDe(v) {
   return v && typeof v === "object" ? Object.values(v).flatMap(textosDe) : [];
 }
 
+/** Lo que identifica al cliente, en una fila con los campos de CAMPOS_CLIENTE. */
+const CAMPOS_CLIENTE = "c.name AS cliente, c.contact_name, c.contact_phone, c.exec_contact_name, e.emergency_contacts";
+const nombresDe = (e) => [e.cliente, e.contact_name, e.contact_phone, e.exec_contact_name, ...textosDe(e.emergency_contacts)];
+
 function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
-  // Intentos fallidos por IP. No cuenta los pedidos que salen bien.
+  // Intentos fallidos por IP. Solo se aplica al rechazar: una key válida nunca queda bloqueada por las
+  // inválidas que otro mande desde la misma dirección.
   const limiteFallidos = rateLimit({
-    windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false, skipSuccessfulRequests: true,
-    requestWasSuccessful: (req, res) => res.statusCode !== 401,
+    windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
     message: { error: "Demasiados intentos con una key inválida. Reintentá en 15 minutos." },
   });
   // Límite propio por key: un agente no agota el cupo del panel ni el de otra key.
@@ -42,18 +46,20 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
     message: { error: "La key superó su límite de pedidos. Reintentá en unos minutos." },
   });
 
+  const rechazar = (req, res, mensaje) => limiteFallidos(req, res, () => res.status(401).json({ error: mensaje }));
+
   const autenticar = ruta(async (req, res, next) => {
     const h = req.headers.authorization;
     const key = typeof h === "string" && h.startsWith("Bearer ") ? h.slice(7).trim() : "";
-    if (!FORMATO.test(key)) throw new ErrorHttp(401, "Falta una key de agente válida (Authorization: Bearer gnga_...).");
+    if (!FORMATO.test(key)) return rechazar(req, res, "Falta una key de agente válida (Authorization: Bearer gnga_...).");
     const k = await qRow(
       `SELECT k.id, k.nombre, k.nivel_max, k.revocada_en IS NOT NULL AS revocada, k.expira_en <= NOW() AS vencida,
               (k.ultimo_uso IS NULL OR k.ultimo_uso < NOW() - INTERVAL 1 MINUTE) AS anotar_uso,
               u.id AS user_id, u.username, u.role, u.is_active, u.must_change_password
        FROM agente_keys k JOIN users u ON u.id=k.user_id WHERE k.hash=?`, [hashDeKey(key)]);
-    if (!k || !k.is_active) throw new ErrorHttp(401, "La key no es válida.");
-    if (k.revocada) throw new ErrorHttp(401, "La key fue revocada.");
-    if (k.vencida) throw new ErrorHttp(401, "La key está vencida.");
+    if (!k || !k.is_active) return rechazar(req, res, "La key no es válida.");
+    if (k.revocada) return rechazar(req, res, "La key fue revocada.");
+    if (k.vencida) return rechazar(req, res, "La key está vencida.");
     if (k.must_change_password) throw new ErrorHttp(403, "El usuario dueño de la key tiene que cambiar su contraseña inicial.");
     req.agente = {
       keyId: k.id, keyNombre: k.nombre, userId: k.user_id, username: k.username, rol: k.role,
@@ -70,7 +76,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
   const conEngagement = (minimo) => ruta(async (req, res, next) => {
     const e = await qRow(
       `SELECT e.id, e.title, e.status, ae.nivel_max, ae.mostrar_sensibles,
-              c.name AS cliente, c.contact_name, c.contact_phone, c.exec_contact_name, e.emergency_contacts
+              ${CAMPOS_CLIENTE}
        FROM engagements e
        JOIN agente_key_engagements ke ON ke.engagement_id=e.id AND ke.key_id=?
        JOIN agente_engagements ae ON ae.engagement_id=e.id
@@ -83,14 +89,14 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
     req.engagement = { id: e.id, titulo: e.title, nivel };
     req.ocultar = O.crear({
       activo: !e.mostrar_sensibles, secreto: secretoBase, engagementId: e.id,
-      nombres: [e.cliente, e.contact_name, e.contact_phone, e.exec_contact_name, ...textosDe(e.emergency_contacts)],
+      nombres: nombresDe(e),
     });
     next();
   });
 
   const ocultador = (opciones) => O.crear({ secreto: secretoBase, ...opciones });
 
-  return { limiteFallidos, limitePorKey, autenticar, conEngagement, ocultador };
+  return { limitePorKey, autenticar, conEngagement, ocultador };
 }
 
-module.exports = { crear, nuevaKey, hashDeKey, FORMATO };
+module.exports = { crear, nuevaKey, hashDeKey, CAMPOS_CLIENTE, nombresDe };

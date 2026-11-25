@@ -33,7 +33,7 @@ function montar(app, deps) {
   };
 
   const router = express.Router();
-  router.use(acceso.limiteFallidos, acceso.autenticar, acceso.limitePorKey);
+  router.use(acceso.autenticar, acceso.limitePorKey);
   lectura.montar(router, { ...deps, acceso, buscarCve: cve.crear() });
   escritura.montar(router, { ...deps, acceso, notificar });
   router.use((req, res) => res.status(404).json({ error: "Ruta inexistente." }));

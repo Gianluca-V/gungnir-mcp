@@ -7,7 +7,8 @@
 const path = require("path");
 const N = require("./niveles");
 const H = require("./hallazgos");
-const { evaluar } = require("./alcance");
+const { evaluador } = require("./alcance");
+const { CAMPOS_CLIENTE, nombresDe } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero, recortar } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
@@ -50,14 +51,15 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
 
   router.get("/engagements", ruta(async (req, res) => {
     const filas = await qRows(
-      `SELECT e.id, e.title, e.type, e.methodology, e.status, e.current_phase, ae.nivel_max, ae.mostrar_sensibles, c.name AS cliente
+      `SELECT e.id, e.title, e.type, e.methodology, e.status, e.current_phase, ae.nivel_max, ae.mostrar_sensibles, ${CAMPOS_CLIENTE}
        FROM engagements e
        JOIN agente_key_engagements ke ON ke.engagement_id=e.id AND ke.key_id=?
        JOIN agente_engagements ae ON ae.engagement_id=e.id AND ae.nivel_max<>'ninguno'
        JOIN clients c ON c.id=e.client_id ORDER BY e.updated_at DESC`, [req.agente.keyId]);
-    const datos = filas.map(({ nivel_max, mostrar_sensibles, cliente, ...e }) => {
-      const o = acceso.ocultador({ engagementId: e.id, nombres: [cliente], activo: !mostrar_sensibles });
-      return { ...o.objeto(e), nivel_efectivo: N.efectivo(req.agente.nivelMax, nivel_max, N.techoDeEstado(e.status)) };
+    const datos = filas.map((f) => {
+      const { id, title, type, methodology, status, current_phase } = f;
+      const o = acceso.ocultador({ engagementId: id, nombres: nombresDe(f), activo: !f.mostrar_sensibles });
+      return { ...o.objeto({ id, title, type, methodology, status, current_phase }), nivel_efectivo: N.efectivo(req.agente.nivelMax, f.nivel_max, N.techoDeEstado(status)) };
     });
     res.json({ contenido_no_confiable: true, datos });
   }));
@@ -88,13 +90,14 @@ function montar(router, { acceso, qRow, qRows, buscarCve }) {
   router.post("/engagements/:id/alcance/verificar", con("lectura"), ruta(async (req, res) => {
     const objetivos = req.body?.objetivos;
     if (!Array.isArray(objetivos) || !objetivos.length || objetivos.length > 100) throw new ErrorHttp(400, `"objetivos" tiene que ser una lista de 1 a 100 textos.`);
-    const items = await alcanceDe(req.engagement.id);
+    const evaluar = evaluador(await alcanceDe(req.engagement.id));
     const datos = objetivos.map((o) => {
       const objetivo = texto(o, "objetivos", { max: 500, obligatorio: true });
-      const { dentro, motivo } = evaluar(objetivo, items);
-      return { objetivo, dentro, motivo };
+      const { dentro, motivo } = evaluar(objetivo);
+      // El motivo puede citar un ítem del alcance, que es texto guardado.
+      return { objetivo, dentro, motivo: req.ocultar.texto(motivo, true) };
     });
-    res.json({ todos_dentro: datos.every((d) => d.dentro), datos });
+    res.json({ contenido_no_confiable: true, todos_dentro: datos.every((d) => d.dentro), datos });
   }));
 
   // ── Hallazgos ───────────────────────────────────────────────────────────────

@@ -4,9 +4,11 @@
  *
  * Reglas:
  *  - Sin ítems dentro de alcance, todo queda fuera.
- *  - Una exclusión gana siempre. Un rango que toca una exclusión queda fuera entero.
+ *  - Una exclusión gana siempre. Un rango que toca una exclusión queda fuera entero, y un objetivo sin
+ *    puerto toca a una exclusión con puerto.
  *  - Un dominio vale solo para sí mismo; los subdominios se piden con "*.dominio".
- *  - Una URL acota esquema, puerto y prefijo de ruta (por segmento completo).
+ *  - Una URL acota esquema, puerto y prefijo de ruta (por segmento completo). Al excluir, la ruta se
+ *    compara sin mayúsculas, sin parámetros de segmento (";x=1") y por http o https.
  *  - Lo que no se puede interpretar queda fuera. Si lo ilegible es una exclusión de red, nada queda
  *    dentro: no se puede saber qué excluye.
  *
@@ -14,9 +16,13 @@
  * un cortafuegos.
  */
 
+const ES_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX32 = (1n << 32n) - 1n;
 const HOST = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9_][a-z0-9_-]{0,62})*$/;
-const PUERTO_DE_ESQUEMA = { http: 80, https: 443, ftp: 21, ws: 80, wss: 443 };
+const PUERTO_DE_ESQUEMA = {
+  http: 80, https: 443, ws: 80, wss: 443, ftp: 21, ftps: 990, ssh: 22, sftp: 22, telnet: 23, smb: 445, rdp: 3389, ldap: 389, ldaps: 636,
+  mysql: 3306, postgres: 5432, postgresql: 5432, redis: 6379, mongodb: 27017, vnc: 5900,
+};
 
 function ipv4ANumero(s) {
   const p = s.split(".");
@@ -41,8 +47,9 @@ function ipv6ANumero(s) {
 function canonizarHost(crudo) {
   let h = String(crudo).trim().toLowerCase().replace(/\.$/, "");
   if (!h) return null;
-  // 010.1.1.1 es 8.1.1.1 para unas herramientas y 10.1.1.1 para otras: no se adivina.
-  if (/^[\d.]+$/.test(h) && h.split(".").some((x) => /^0\d/.test(x))) return null;
+  // 010.1.1.1 es 8.1.1.1 para unas herramientas y 10.1.1.1 para otras, y un número suelto puede ser un
+  // resto de "10.0.0.5,6,7": no se adivina. Una IPv4 se escribe con sus cuatro partes en decimal.
+  if (/^(?:0x[\da-f]*|\d+)(?:\.(?:0x[\da-f]*|\d+))*$/.test(h) && ipv4ANumero(h) === null) return null;
   if (h.includes(":") && !h.startsWith("[")) h = `[${h}]`;
   let canon;
   try { canon = new URL(`http://${h}/`).hostname; } catch { return null; }
@@ -52,7 +59,8 @@ function canonizarHost(crudo) {
     return (n >> 32n) === 0xffffn ? { ip: { v: 4, n: n & MAX32 } } : { ip: { v: 6, n } };
   }
   const n4 = ipv4ANumero(canon);
-  if (n4 !== null) return { ip: { v: 4, n: n4 } };
+  // 255.255.255.0 y 0.0.0.255 son máscaras, no equipos.
+  if (n4 !== null) return n4 >> 24n === 255n || n4 >> 24n === 0n ? null : { ip: { v: 4, n: n4 } };
   return HOST.test(canon) ? { host: canon } : null;
 }
 
@@ -83,25 +91,30 @@ function conHost(c, resto) {
   return c.ip ? { v: c.ip.v, ini: c.ip.n, fin: c.ip.n, ...resto } : { host: c.host, ...resto };
 }
 
-function leerUrl(s, conEsquema) {
+function leerUrl(s, conEsquema, comodin) {
   let u;
   try { u = new URL(conEsquema ? s : `http://${s}`); } catch { return null; }
   const c = canonizarHost(u.hostname.replace(/^\[|\]$/g, ""));
   if (!c) return null;
   let ruta;
   try { ruta = decodeURIComponent(u.pathname); } catch { return null; }
-  // Tras decodificar no puede quedar nada que suba de directorio: cada servidor lo lee distinto.
-  if (ruta.includes("\\") || ruta.split("/").some((p) => p === ".." || p === ".") || /%2e|%2f|%5c/i.test(ruta)) return null;
+  // Tras decodificar no puede quedar nada codificado ni que suba de directorio: cada servidor lo lee distinto.
+  if (/[\\\x00-\x1f]|%[\da-f]{2}/i.test(ruta) || ruta.split("/").some((p) => p === ".." || p === ".")) return null;
+  // "10.0.0.0/255.255.255.0" es una red con máscara, no una ruta.
+  if (!conEsquema && /^\/\d{1,3}(?:\.\d{1,3}){3}$/.test(ruta)) return null;
+  ruta = ruta.split("/").map((p) => p.split(";")[0]).join("/").replace(/\/{2,}/g, "/");
+  if (comodin) ruta = ruta.replace(/\/\*{1,2}$/, "");
+  if (comodin && ruta.includes("*")) return null;
   const esquema = conEsquema ? u.protocol.slice(0, -1) : null;
   const puerto = u.port ? Number(u.port) : esquema ? PUERTO_DE_ESQUEMA[esquema] ?? null : null;
-  return conHost(c, { clase: "url", esquema, puerto, ruta: ruta.replace(/\/+$/, "") || "/" });
+  return conHost(c, { clase: "url", esquema, puerto, puertoExplicito: Boolean(u.port), ruta: ruta.replace(/\/+$/, "") || "/" });
 }
 
 /** Interpreta un objetivo o un ítem del alcance. Null si no se entiende. */
 function leer(crudo, { comodin = false } = {}) {
   const s = String(crudo ?? "").trim();
-  if (!s || s.length > 2000) return null;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return leerUrl(s, true);
+  if (!s || s.length > 2000 || /[\\\x00-\x1f]/.test(s)) return null;
+  if (ES_URL.test(s)) return leerUrl(s, true, comodin);
   const rango = rangoCidr(s) || rangoConGuion(s);
   if (rango) return rango.ilegible ? null : rango;
   if (s.startsWith("*.")) {
@@ -117,7 +130,7 @@ function leer(crudo, { comodin = false } = {}) {
     if (!c || (puerto !== null && (puerto < 1 || puerto > 65535))) return null;
     return conHost(c, { clase: c.ip ? "ip" : "host", puerto });
   }
-  if (s.includes("/")) return leerUrl(s, false);
+  if (s.includes("/")) return leerUrl(s, false, comodin);
   const c = canonizarHost(s);
   return c && conHost(c, { clase: c.ip ? "ip" : "host", puerto: null });
 }
@@ -145,15 +158,18 @@ function cubre(item, t) {
 function toca(item, t) {
   if (!mismoHost(t, item)) return false;
   if (tieneIp(t) && (t.fin < item.ini || t.ini > item.fin)) return false;
-  if (item.clase !== "url") return item.puerto === null || item.puerto === t.puerto;
-  if (item.ruta === "/") return t.puerto === null || item.puerto === null || t.puerto === item.puerto;
-  // Sin mirar esquema ni puerto: la misma ruta por http y por https suele ser la misma aplicación.
-  return t.clase === "url" && rutaDentro(t.ruta, item.ruta);
+  if (item.clase !== "url") return item.puerto === null || t.puerto === null || item.puerto === t.puerto;
+  if (item.ruta !== "/") return t.clase === "url" && rutaDentro(t.ruta.toLowerCase(), item.ruta.toLowerCase());
+  // Sin puerto escrito, excluir el sitio vale por http y por https.
+  return t.puerto === null || item.puerto === null || t.puerto === item.puerto || (!item.puertoExplicito && [80, 443].includes(t.puerto));
 }
 
 const normal = (s) => String(s ?? "").trim().toLocaleLowerCase("es");
-const partir = (s) => String(s ?? "").split(/[\s,;]+/).filter(Boolean);
+/** Separa por espacios, comas y punto y coma, menos los que son parte de una URL. */
+const partir = (s) => String(s ?? "").split(/\s+/)
+  .flatMap((p) => p.replace(/[,;]+$/, "").split(ES_URL.test(p) ? /[,;](?=[a-z][a-z0-9+.-]*:\/\/)/i : /[,;]+/)).filter(Boolean);
 const ES_LIBRE = new Set(["application", "other"]);
+const ES_DE_IP = new Set(["ip", "cidr"]);
 
 function preparar(items, dentro) {
   const red = [], libres = new Set();
@@ -162,34 +178,47 @@ function preparar(items, dentro) {
     if (Boolean(Number(it.in_scope)) !== dentro) continue;
     if (ES_LIBRE.has(it.type)) libres.add(normal(it.value));
     if (ES_LIBRE.has(it.type) && dentro) continue;
-    for (const parte of partir(it.value)) {
+    const partes = partir(it.value);
+    for (const parte of partes) {
       const x = leer(parte, { comodin: true });
-      if (x) red.push(x);
+      // En una lista, un nombre sin puntos es casi seguro una palabra ("10.0.0.5 a 10.0.0.20"), y un ítem
+      // de tipo IP o CIDR solo puede traer direcciones.
+      const sospechoso = x && ((partes.length > 1 && x.host && !x.host.includes(".")) || (ES_DE_IP.has(it.type) && x.clase !== "ip"));
+      if (x && !(sospechoso && !ES_LIBRE.has(it.type))) red.push(x);
       else if (!ES_LIBRE.has(it.type)) ilegible = it.value;
     }
   }
   return { red, libres, ilegible };
 }
 
+/** Prepara un alcance para evaluar muchos objetivos sin volver a leerlo. */
+function evaluador(items) {
+  const si = preparar(items, true), no = preparar(items, false);
+  return (objetivo) => evaluarPreparado(objetivo, si, no);
+}
+
 /**
  * Evalúa uno o varios objetivos (separados por espacios, comas o punto y coma).
  * Devuelve { dentro, motivo }: todos tienen que estar dentro.
  */
-function evaluar(objetivo, items) {
+const evaluar = (objetivo, items) => evaluador(items)(objetivo);
+
+function evaluarPreparado(objetivo, si, no) {
   const texto = String(objetivo ?? "").trim();
   if (!texto) return { dentro: false, motivo: "No se indicó un objetivo." };
-  const si = preparar(items, true), no = preparar(items, false);
   if (no.libres.has(normal(texto))) return { dentro: false, excluido: true, motivo: `"${texto}" está excluido del alcance.` };
   if (no.ilegible) return { dentro: false, motivo: `No se puede interpretar la exclusión "${no.ilegible}": hay que corregirla en el alcance.` };
+  const partes = partir(texto).map((parte) => [parte, leer(parte)]);
+  const excluida = partes.find(([, t]) => t && no.red.some((e) => toca(e, t)));
+  if (excluida) return { dentro: false, excluido: true, motivo: `"${excluida[0]}" está excluido del alcance.` };
   if (si.libres.has(normal(texto))) return { dentro: true, motivo: null };
   if (!si.red.length && !si.libres.size) return { dentro: false, motivo: "El engagement no tiene objetivos dentro de alcance." };
-  for (const parte of partir(texto)) {
-    const t = leer(parte);
+  if (!partes.length) return { dentro: false, motivo: "No se indicó un objetivo." };
+  for (const [parte, t] of partes) {
     if (!t) return { dentro: false, motivo: `No se puede interpretar el objetivo "${parte}".` };
-    if (no.red.some((e) => toca(e, t))) return { dentro: false, excluido: true, motivo: `"${parte}" está excluido del alcance.` };
     if (!si.red.some((e) => cubre(e, t))) return { dentro: false, motivo: `"${parte}" no está en el alcance.` };
   }
   return { dentro: true, motivo: null };
 }
 
-module.exports = { evaluar, leer };
+module.exports = { evaluar, evaluador, leer };

@@ -26,6 +26,7 @@ const TIPOS = {
 };
 const MB = 1024 * 1024;
 const VENTANA_EN_CURSO_MIN = 10;
+const TOPE_VIOLACIONES = 50;
 
 function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, carpeta }) {
   const con = acceso.conEngagement;
@@ -37,6 +38,8 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
 
   const anotar = (req, accion, entidad, id, detalle) =>
     auditLog(req.agente.userId, req.agente.username, `agente_${accion}`, entidad, id, `[key ${req.agente.keyNombre}] ${detalle || ""}`.slice(0, 2000), req.ip);
+  /** Pone en fila las altas de un engagement, para que dos iguales a la vez no pasen el control de duplicados. */
+  const enFila = (tx, id) => tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [id]);
   const alcanceDe = (q, id) => q.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [id]);
 
   // Adentro de una transacción solo se usa su conexión: pedir otra al pool puede trabarlo entero.
@@ -116,7 +119,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     if (!a.dentro) await violacion(tx, req, { tipo: "log", logId: id, objetivo, motivo: a.motivo });
     return {
       codigo: 201,
-      cuerpo: { id, fuera_de_alcance: !a.dentro, ...(a.dentro ? {} : { alerta: `VIOLACIÓN DE ALCANCE registrada: ${a.motivo} Detené las acciones sobre ese objetivo y avisá a la persona a cargo.` }) },
+      cuerpo: { id, fuera_de_alcance: !a.dentro, ...(a.dentro ? {} : { alerta: `VIOLACIÓN DE ALCANCE registrada: ${req.ocultar.texto(a.motivo, true)} Detené las acciones sobre ese objetivo y avisá a la persona a cargo.` }) },
     };
   }));
 
@@ -124,13 +127,14 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
   const exigirActivoEnAlcance = async (tx, req, activo) => {
     const a = evaluar(activo, await alcanceDe(tx, req.engagement.id));
     if (a.dentro) return;
-    const e = new ErrorHttp(422, `El hallazgo se rechazó por alcance: ${a.motivo} "affected_asset" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
+    const e = new ErrorHttp(422, `El hallazgo se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "affected_asset" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
     e.violacion = { tipo: "hallazgo", objetivo: activo, motivo: a.motivo };
     throw e;
   };
 
   router.post("/engagements/:id/hallazgos", con("propuesta"), escribir(async (req, tx) => {
     const datos = H.validar(req.body, { alta: true });
+    await enFila(tx, req.engagement.id);
     await exigirActivoEnAlcance(tx, req, datos.affected_asset);
     const dup = await H.buscarDuplicado(tx, req.engagement.id, datos);
     if (dup) throw new ErrorHttp(409, `Ya existe ${dup.tipo === "hallazgo" ? "un hallazgo" : "una propuesta pendiente"} con ese título y ese activo.`, { existente: dup });
@@ -148,8 +152,9 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
 
   router.put("/engagements/:id/hallazgos/:fid", con("propuesta"), escribir(async (req, tx) => {
     const datos = H.validar(req.body, { alta: false });
-    const f = await tx.qRow("SELECT id, title FROM findings WHERE id=? AND engagement_id=?", [req.params.fid, req.engagement.id]);
+    const f = await tx.qRow("SELECT id, title, status FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [req.params.fid, req.engagement.id]);
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
+    if (f.status === "accepted" && datos.status) throw new ErrorHttp(409, "Una persona aceptó el riesgo de este hallazgo: su estado no se cambia desde acá.");
     if (datos.affected_asset) await exigirActivoEnAlcance(tx, req, datos.affected_asset);
     if (!N.alcanza(req.engagement.nivel, "escritura")) {
       const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "actualizar", findingId: f.id, datos });
@@ -218,6 +223,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     const minima = opcion(req.body.severidad_minima, "severidad_minima", H.SEVERIDADES) || "info";
     const fase = opcion(req.body.fase, "fase", H.FASES) || "scanning";
     const leidos = importacion.leer(formato, req.file.buffer.toString("utf8"));
+    await enFila(tx, req.engagement.id);
     const items = await alcanceDe(tx, req.engagement.id);
     const { aceptados, fuera, bajoMinimo } = importacion.clasificar(leidos, items, minima);
     if (aceptados.length > importacion.TOPE)
@@ -236,7 +242,9 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
         : await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "crear", datos });
       creados.push({ id, title: datos.title, severity: datos.severity, affected_asset: datos.affected_asset });
     }
-    for (const [objetivo, motivo] of fuera) await violacion(tx, req, { tipo: "importacion", objetivo, motivo });
+    for (const [objetivo, motivo] of [...fuera].slice(0, TOPE_VIOLACIONES)) await violacion(tx, req, { tipo: "importacion", objetivo, motivo });
+    if (fuera.size > TOPE_VIOLACIONES)
+      await violacion(tx, req, { tipo: "importacion", objetivo: `${fuera.size - TOPE_VIOLACIONES} equipos más`, motivo: `El archivo "${ev.nombre}" trae ${fuera.size} equipos fuera de alcance. El detalle está en la evidencia.` });
     const porSeveridad = Object.fromEntries(H.SEVERIDADES.map((s) => [s, creados.filter((c) => c.severity === s).length]).filter(([, n]) => n));
     return {
       codigo: 201,
@@ -262,8 +270,8 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     H.exigirSinMarcas(nota);
     await tx.qRun(
       `INSERT INTO methodology_checks (id,engagement_id,framework,item_key,status,note,updated_by) VALUES (UUID(),?,?,?,?,?,?)
-       ON DUPLICATE KEY UPDATE status=VALUES(status), note=VALUES(note), updated_by=VALUES(updated_by)`,
-      [req.engagement.id, framework, req.params.item, estado, nota, req.agente.userId]);
+       ON DUPLICATE KEY UPDATE status=VALUES(status), note=COALESCE(VALUES(note), note), updated_by=VALUES(updated_by)`,
+      [req.engagement.id, framework, req.params.item, estado, nota, req.agente.userId]); // Sin nota, queda la que había.
     return { codigo: 200, cuerpo: { framework, item: req.params.item, estado }, despues: () => anotar(req, "metodologia", "methodology_checks", null, `${req.params.item}: ${estado}`) };
   }));
 

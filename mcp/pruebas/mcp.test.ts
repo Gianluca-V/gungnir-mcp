@@ -107,8 +107,11 @@ describe('archivos', () => {
     writeFileSync(path.join(carpeta, 'grande.txt'), Buffer.alloc(20 * 1024 * 1024 + 1))
   })
   after(() => rmSync(raiz, { recursive: true, force: true }))
-  test('lee lo que está adentro', async () => assert.equal((await leerArchivo(carpeta, 'sub/scan.xml')).nombre, 'scan.xml'))
-  for (const r of ['../secreto.txt', 'sub/../../secreto.txt', path.join(raiz, 'secreto.txt'), '../trabajo-otra/a.txt', '.env', '.git/config', 'sub', '.', '', 'vacio.txt', 'grande.txt', 'no-existe', 'a\0b'])
+  test('lee lo que está adentro, también con la ruta completa', async () => {
+    assert.equal((await leerArchivo(carpeta, 'sub/scan.xml')).nombre, 'scan.xml')
+    assert.equal((await leerArchivo(carpeta, path.join(carpeta, 'sub', 'scan.xml'))).nombre, 'scan.xml')
+  })
+  for (const r of ['../secreto.txt', 'sub/../../secreto.txt', path.join(raiz, 'secreto.txt'), '../trabajo-otra/a.txt', '\\\\servidor\\recurso\\a.txt', '//servidor/recurso/a.txt', '.env', '.git/config', 'sub', '.', '', 'vacio.txt', 'grande.txt', 'no-existe', 'a\0b'])
     test(`🔴 rechaza ${JSON.stringify(r).slice(0, 40)}`, () => assert.rejects(leerArchivo(carpeta, r), ErrorGungnir))
   test('🔴 un enlace hacia afuera no sirve para salir', async (t) => {
     try { symlinkSync(raiz, path.join(carpeta, 'enlace'), 'junction') } catch { return t.skip('sin permiso para crear enlaces') }

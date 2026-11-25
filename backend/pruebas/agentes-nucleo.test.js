@@ -45,7 +45,7 @@ describe("alcance", () => {
     ["10.10.1.1", true], ["10.10.1.1:8080", true], ["10.10.1.1:445/tcp", true], ["10.11.0.1", false],
     ["10.10.5.5", false], ["10.10.9.0/25", false], ["10.10.0.0/16", false], ["10.10.1.0/24", true],
     ["10.0.0.0/8", false], ["0.0.0.0/0", false], ["10.10.1.1-20", true], ["10.10.5.1-20", false],
-    ["168427777", true], ["0x0a0a0101", true], ["010.10.1.1", false],
+    ["168427777", false], ["0x0a0a0101", false], ["010.10.1.1", false],
     ["app.ejemplo.com", true], ["APP.ejemplo.com.", true], ["ejemplo.com", false], ["x.app.ejemplo.com", false],
     ["app.ejemplo.com.atacante.net", false], ["noapp.ejemplo.com", false],
     ["a.lab.ejemplo.com", true], ["lab.ejemplo.com", false], ["prod.lab.ejemplo.com", false],
@@ -74,6 +74,47 @@ describe("alcance", () => {
   });
   test("una dirección escrita en un ítem domain también vale como IP", () => {
     assert.equal(evaluar("192.168.1.4", [en("domain", "192.168.1.4")]).dentro, true);
+  });
+  // Hallazgos de la verificación independiente.
+  const dentro = (objetivo, ...items) => evaluar(objetivo, items).dentro;
+  const RED = en("cidr", "10.0.0.0/24"), SITIO = en("domain", "app.acme.com");
+  describe("una exclusión con puerto alcanza a lo que no lo indica", () => {
+    for (const [o, d] of [["10.0.0.5", false], ["10.0.0.0/24", false], ["ssh://10.0.0.5/", false], ["sftp://10.0.0.5/", false], ["raro://10.0.0.5/", false], ["10.0.0.5:22", false], ["10.0.0.5:80", true], ["http://10.0.0.5/", true], ["10.0.0.6", true]])
+      test(`${o}: ${d}`, () => assert.equal(dentro(o, RED, fuera("ip", "10.0.0.5:22")), d));
+  });
+  test("una exclusión de red gana a un ítem libre dentro de alcance", () => {
+    assert.equal(dentro("10.0.0.5", en("application", "10.0.0.5"), fuera("cidr", "10.0.0.0/24")), false);
+  });
+  describe("una exclusión mal escrita hace que nada quede dentro", () => {
+    for (const x of ["10.0.0.5,6,7", "10.0.0.5 a 10.0.0.20", "10.0.0.5 al 10.0.0.20", "10.0.0.5 - 10.0.0.20", "10.0.0.0/255.255.255.0", "10.0.0.0 255.255.255.0", "10.0.0.0 0.0.0.255", "10.0.0.5:80,443", "10.0.0.5 (DC)", "10.0.0.*"])
+      for (const tipo of ["ip", "cidr", "domain", "url"])
+        test(`${tipo} ${x}`, () => assert.equal(dentro("10.0.0.10", RED, fuera(tipo, x)), false));
+  });
+  test("un nombre sin puntos solo vale si va solo", () => {
+    assert.equal(dentro("DC01", en("domain", "DC01")), true);
+    assert.equal(dentro("DC01", en("domain", "DC01"), fuera("domain", "DC02")), true);
+  });
+  describe("una ruta excluida no se esquiva", () => {
+    for (const r of ["/admin", "//admin/x", "/admin/", "/%61dmin", "/%2561dmin", "/ADMIN/x", "/admin;x=1/y", "/x/../admin", "/./admin", "/admin?x", "/admin#x"])
+      test(r, () => assert.equal(dentro(`https://app.acme.com${r}`, SITIO, fuera("url", "https://app.acme.com/admin")), false));
+    test("con comodín al final", () => {
+      assert.equal(dentro("https://app.acme.com/admin/x", SITIO, fuera("url", "https://app.acme.com/admin/*")), false);
+      assert.equal(dentro("https://app.acme.com/otro", SITIO, fuera("url", "https://app.acme.com/admin/*")), true);
+    });
+    test("un comodín en el medio no se interpreta", () => assert.equal(dentro("https://app.acme.com/otro", SITIO, fuera("url", "https://app.acme.com/*/admin")), false));
+  });
+  test("excluir un sitio por su URL vale para http y https, no para otros puertos", () => {
+    const x = fuera("url", "https://app.acme.com");
+    for (const o of ["http://app.acme.com/", "https://app.acme.com/x", "app.acme.com", "app.acme.com:443"]) assert.equal(dentro(o, SITIO, x), false, o);
+    assert.equal(dentro("app.acme.com:8443", SITIO, x), true);
+  });
+  test("una URL con coma o punto y coma es una sola", () => {
+    for (const o of ["https://app.acme.com/login;jsessionid=AB12", "https://app.acme.com/a?ids=1,2"]) assert.equal(dentro(o, SITIO), true, o);
+    assert.equal(dentro("https://app.acme.com/a,https://otro.com/b", SITIO), false);
+    assert.equal(dentro("https://app.acme.com/a, 8.8.8.8", SITIO), false);
+  });
+  test("una barra invertida no cambia de host", () => {
+    for (const o of ["https://app.acme.com\\@malo.com/", "app.acme.com\\x"]) assert.equal(dentro(o, SITIO), false, o);
   });
   test("una exclusión por URL excluye su ruta y no el resto del sitio", () => {
     const a = [en("domain", "x.com"), fuera("url", "https://x.com/pagos")];
@@ -105,6 +146,19 @@ describe("ocultamiento", () => {
     ["escribir a ana@bancorio.com", "ana@bancorio.com"],
     ["Informe para Banco Río", "Banco Río"],
     ["contacto ANA PÉREZ", "ANA PÉREZ"],
+    // Hallazgos de la verificación independiente.
+    ["DB_PASSWORD=Secreta123", "Secreta123"], ["MYSQL_ROOT_PASSWORD: Secreta123", "Secreta123"], ["JWT_SECRET=abcdef0123", "abcdef0123"],
+    ["aws_secret_access_key = wJalrXUtnFEMI/K7", "wJalrXUtnFEMI"], ['"user_password":"Secreta123"', "Secreta123"], ['"userPassword": "Secreta123"', "Secreta123"],
+    ["access_token=abc123def", "abc123def"], ["refresh_token=abc123def", "abc123def"], ["pass=Secreta123", "Secreta123"], ["DB_PASS=Secreta123", "Secreta123"],
+    ["'password' => 'Secreta123'", "Secreta123"], ["define('DB_PASSWORD', 'Secreta123');", "Secreta123"], ["password: P@ss,word;99", "word;99"], ['password="dos palabras"', "palabras"],
+    ["curl -u admin:Hola1234 http://x", "Hola1234"], ["mysql -uroot -pHola1234", "Hola1234"], ["smbclient -U ana%Hola1234 //h/c", "Hola1234"], ["xfreerdp /u:a /p:Hola1234 /v:h", "Hola1234"],
+    ["nxc smb h -u a -H 31d6cfe0d16ae931b73c59d7e0c089c0", "31d6cfe0"], ["evil-winrm -i h -H 31d6cfe0d16ae931b73c59d7e0c089c0", "31d6cfe0"], ["psexec.py -hashes :31d6cfe0d16ae931b73c59d7e0c089c0 a@h", "31d6cfe0"],
+    ["ana::CORP:1122334455667788:0123456789abcdef0123456789abcdef:0101000000000000aabbccdd", "0123456789abcdef0123"],
+    ["Cookie: PHPSESSID=abc123def456; x=1", "abc123def456"], ["Set-Cookie: sid=zzz999; Path=/", "zzz999"], ["JSESSIONID=AB12CD34", "AB12CD34"], ["nxc smb h -u a -p 12345678", "12345678"],
+    ["Authorization: token abcd1234", "abcd1234"], ["Authorization: abcd1234abcd", "abcd1234abcd"], ["redis://:Hola1234@h", "Hola1234"],
+    ["password is Hola1234", "Hola1234"], ["la contraseña es Hola1234", "Hola1234"], [`sk_live_${"a1B2c3".repeat(4)}`, "a1B2c3"],
+    ["npm_abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghij"], ["https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX", "XXXXXXXX"],
+    ["-----BEGIN PGP PRIVATE KEY BLOCK-----\nabcd", "abcd"], ["PuTTY-User-Key-File-2: ssh-rsa\nPrivate-Lines: 1\nAAAA", "AAAA"],
   ];
   for (const [texto, secreto] of ocultos)
     test(`oculta en ${JSON.stringify(texto.slice(0, 45))}`, () => {
@@ -112,8 +166,15 @@ describe("ocultamiento", () => {
       assert.ok(!r.includes(secreto), r);
       assert.match(r, /\[OCULTO:/);
     });
-  for (const limpio of ["nmap -sV -p 80,443 10.10.1.1", "curl https://app.ejemplo.com/login", "CVE-2024-12345 en Apache 2.4.49", "El formulario de contraseña no limita intentos"])
+  for (const limpio of ["nmap -sV -p 80,443 10.10.1.1", "curl https://app.ejemplo.com/login", "CVE-2024-12345 en Apache 2.4.49", "El formulario de contraseña no limita intentos",
+    "gobuster dir -u http://app.ejemplo.com:8080/x -w lista.txt", "hydra -l admin -P lista.txt ssh://10.0.0.1", "bypass: se evita el control", "ffuf -u https://app.ejemplo.com/FUZZ", "nmap -p 22 10.0.0.1"])
     test(`no toca ${JSON.stringify(limpio)}`, () => assert.equal(o.texto(limpio), limpio));
+  test("el cliente se oculta siempre en su campo, aunque el nombre sea corto", () => {
+    const b = O.crear({ secreto: "s".repeat(32), engagementId: "e1", nombres: ["EY"] });
+    const r = b.objeto({ cliente: "EY", title: "Pentest EY 2026", notes: "hey you" });
+    assert.ok(!r.cliente.includes("EY") && !r.title.includes("EY"));
+    assert.equal(r.notes, "hey you");
+  });
   test("el mismo valor da siempre la misma marca, y otro engagement da otra", () => {
     const p = O.crear({ secreto: "s".repeat(32), engagementId: "e2", nombres: [] });
     assert.equal(o.texto("ana@x.com"), o.texto("ana@x.com"));
@@ -146,7 +207,9 @@ describe("ocultamiento", () => {
   test("un texto hostil y largo no lo cuelga", () => {
     const t0 = Date.now();
     const hostiles = ["a".repeat(200000), "password=".repeat(20000), "-----BEGIN ".repeat(10000), "a@".repeat(50000),
-      "nxc -p ".repeat(20000), "x://".repeat(40000), "eyJ".repeat(60000), "A/".repeat(80000), "a:".repeat(80000), " ".repeat(200000)];
+      "nxc -p ".repeat(20000), "x://".repeat(40000), "eyJ".repeat(60000), "A/".repeat(80000), "a:".repeat(80000), " ".repeat(200000),
+      "-eyJ".repeat(50000), ".eyJ".repeat(50000), "eyJaaaaaaaa.".repeat(16000), "sk-".repeat(66000), "Cookie:".repeat(28000), "a_password".repeat(20000), "password =".repeat(20000),
+      "-u a:".repeat(40000), "mysql -p".repeat(25000), "-H ".repeat(66000), "a::b:".repeat(40000), "'password','".repeat(18000), "token".repeat(40000), "-hashes :".repeat(22000)];
     for (const s of hostiles) o.texto(s);
     assert.ok(Date.now() - t0 < 4000, `tardó ${Date.now() - t0} ms`);
   });

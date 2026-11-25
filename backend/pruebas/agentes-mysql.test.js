@@ -261,6 +261,91 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("hallazgos de la verificación independiente", () => {
+    const conAlcance = async (items, fn) => {
+      const antes = await sql("SELECT * FROM scope_items WHERE engagement_id=?", [E.a]);
+      await sql("DELETE FROM scope_items WHERE engagement_id=?", [E.a]);
+      for (const [t, v, d] of items) await sql("INSERT INTO scope_items (id,engagement_id,type,value,in_scope) VALUES (?,?,?,?,?)", [uid(), E.a, t, v, d]);
+      try { return await fn(); } finally {
+        await sql("DELETE FROM scope_items WHERE engagement_id=?", [E.a]);
+        for (const a of antes) await sql("INSERT INTO scope_items (id,engagement_id,type,value,in_scope) VALUES (?,?,?,?,?)", [a.id, E.a, a.type, a.value, a.in_scope]);
+      }
+    };
+    const nmap = (ip, puerto, nombre) => `<nmaprun><host><status state="up"/><address addr="${ip}" addrtype="ipv4"/>${nombre ? `<hostnames><hostname name="${nombre}" type="user"/></hostnames>` : ""}<ports><port protocol="tcp" portid="${puerto}"><state state="open"/></port></ports></host></nmaprun>`;
+    const importar = (key, formato, contenido) => ag(key, "POST", `/engagements/${E.a}/importar`, { formato }, { archivo: { nombre: formato === "nuclei" ? "n.jsonl" : "s.xml", contenido } });
+
+    test("🔴 importar guarda el activo que está en alcance, no otro", () => conAlcance([["domain", "web.acme.com", 1]], async () => {
+      const r = await importar("propuesta", "nmap", nmap("203.0.113.9", 80, "web.acme.com"));
+      assert.equal(r.status, 201, r.texto);
+      const p = r.json.muestra[0];
+      assert.equal(p.affected_asset, "web.acme.com:80/tcp");
+      assert.equal((await panel("auditor", "POST", `/propuestas/${p.id}/aprobar`)).status, 200);
+    }));
+    test("🔴 importar respeta exclusiones por puerto y por ruta, y el alcance por puerto", async () => {
+      await conAlcance([["cidr", "10.20.0.0/24", 1], ["ip", "10.20.0.5:22", 0]], async () => {
+        assert.equal((await importar("escritura", "nmap", nmap("10.20.0.5", 22))).json.hallazgos_creados, 0);
+        assert.equal((await importar("escritura", "nmap", nmap("10.20.0.5", 80))).json.hallazgos_creados, 1);
+      });
+      const nuclei = (u) => JSON.stringify({ "template-id": "t", info: { name: `N ${uid()}`, severity: "high" }, host: "https://web.acme.com", "matched-at": u, type: "http" });
+      await conAlcance([["domain", "web.acme.com", 1], ["url", "https://web.acme.com/admin", 0]], async () => {
+        assert.equal((await importar("escritura", "nuclei", nuclei("https://web.acme.com/admin/login"))).json.hallazgos_creados, 0);
+        const r = await importar("escritura", "nuclei", nuclei("https://web.acme.com/blog"));
+        assert.equal(r.json.muestra[0].affected_asset, "https://web.acme.com/blog");
+      });
+      await conAlcance([["url", "https://web.acme.com/portal", 1]], async () =>
+        assert.equal((await importar("escritura", "nuclei", nuclei("https://web.acme.com/portal/x"))).json.hallazgos_creados, 1));
+      await conAlcance([["ip", "10.20.0.7:443", 1]], async () => assert.equal((await importar("escritura", "nmap", nmap("10.20.0.7", 443))).json.hallazgos_creados, 1));
+    });
+    test("🔴 muchos equipos fuera de alcance se resumen en pocas violaciones", async () => {
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+      const xml = `<nmaprun>${Array.from({ length: 1500 }, (_, i) => nmap(`172.20.${i >> 8}.${i & 255}`, 80).replace(/<\/?nmaprun>/g, "")).join("")}${nmap("10.10.4.4", 80).replace(/<\/?nmaprun>/g, "")}</nmaprun>`;
+      const t0 = Date.now(), r = await importar("propuesta", "nmap", xml);
+      assert.equal(r.status, 201, r.texto); assert.ok(Date.now() - t0 < 6000, `${Date.now() - t0} ms`);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 51);
+    });
+    test("🔴 el listado oculta lo mismo que el detalle, y los motivos también se ocultan", async () => {
+      await sql("UPDATE engagements SET title='Pentest - Carla Gómez' WHERE id=?", [E.a]);
+      assert.ok(!(await ag("lectura", "GET", "/engagements")).texto.includes("Carla"));
+      await conAlcance([["cidr", "10.10.0.0/16", 1], ["url", "https://admin:Secreta123@vpn-{a}.acme.com/", 0]], async () => {
+        const v = await ag("lectura", "POST", `/engagements/${E.a}/alcance/verificar`, { objetivos: ["10.10.1.1"] });
+        assert.ok(!v.texto.includes("Secreta123"), v.texto); assert.equal(v.json.contenido_no_confiable, true);
+        for (const [r, b] of [["logs", { fase: "recon", objetivo: "10.10.1.1", comando: "x" }], ["hallazgos", hallazgo()]])
+          assert.ok(!(await ag("propuesta", "POST", `/engagements/${E.a}/${r}`, b)).texto.includes("Secreta123"), r);
+      });
+    });
+    test("🔴 marcar la metodología sin nota no borra la que había", async () => {
+      const r = `/engagements/${E.a}/metodologia/WSTG-INFO-05`;
+      await ag("escritura", "PUT", r, { estado: "pending", nota: "nota humana" });
+      await ag("escritura", "PUT", r, { estado: "tested" });
+      const f = (await sql("SELECT status,note FROM methodology_checks WHERE engagement_id=? AND item_key='WSTG-INFO-05'", [E.a]))[0];
+      assert.deepEqual({ ...f }, { status: "tested", note: "nota humana" });
+    });
+    test("🔴 hallazgos iguales a la vez, con claves distintas, crean uno solo", async () => {
+      const h = hallazgo();
+      const r = await Promise.all(Array.from({ length: 8 }, () => ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, h, { headers: { "Idempotency-Key": uid() } })));
+      assert.equal(r.filter((x) => x.status === 201).length, 1);
+      assert.equal(await contar("findings", "title=?", [h.title]), 1);
+    });
+    test("🔴 aprobar algo que ya existe como hallazgo se avisa y no duplica", async () => {
+      const h = hallazgo(), id = (await ag("propuesta", "POST", `/engagements/${E.a}/hallazgos`, h)).json.propuesta_id;
+      await sql("INSERT INTO findings (id,engagement_id,title,affected_asset) VALUES (?,?,?,?)", [uid(), E.a, h.title, h.affected_asset]);
+      assert.equal((await panel("auditor", "POST", `/propuestas/${id}/aprobar`)).status, 409);
+      assert.equal(await contar("findings", "title=?", [h.title]), 1);
+    });
+    test("🔴 un agente no revierte un riesgo aceptado por una persona", async () => {
+      const id = (await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo())).json.hallazgo_id;
+      await sql("UPDATE findings SET status='accepted' WHERE id=?", [id]);
+      assert.equal((await ag("escritura", "PUT", `/engagements/${E.a}/hallazgos/${id}`, { status: "open" })).status, 409);
+      assert.equal((await sql("SELECT status FROM findings WHERE id=?", [id]))[0].status, "accepted");
+    });
+    test("🔴 las keys inválidas no bloquean a las válidas, ni muchas válidas a la vez", async () => {
+      const malas = await Promise.all(Array.from({ length: 90 }, () => pedir("GET", `${V1}/yo`, { bearer: "gnga_" + "1".repeat(64) })));
+      assert.ok(malas.some((x) => x.status === 429));
+      const buenas = await Promise.all(Array.from({ length: 120 }, () => ag("lectura", "GET", "/yo")));
+      assert.ok(buenas.every((x) => x.status === 200), [...new Set(buenas.map((x) => x.status))].join());
+    });
+  });
+
   describe("ocultamiento", () => {
     test("🔴 ni el cliente ni los secretos salen mientras no se habilite", async () => {
       const r = await ag("lectura", "GET", `/engagements/${E.a}`);
@@ -441,6 +526,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     const xml = (...h) => `<?xml version="1.0"?><nmaprun>${h.join("")}</nmaprun>`;
     const importar = (key, contenido, body = {}, extra = {}) => ag(key, "POST", `/engagements/${E.a}/importar`, { formato: "nmap", ...body }, { archivo: { nombre: "scan.xml", contenido }, ...extra });
     test("🔴 entra lo que está en alcance, se ignora y se denuncia el resto, y el original queda como evidencia", async () => {
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
       const r = await importar("escritura", xml(host("10.10.2.1", 445), host("10.10.5.5", 80), host("8.8.8.8", 53)));
       assert.equal(r.status, 201, r.texto);
       assert.equal(r.json.hallazgos_creados, 1);
@@ -448,7 +534,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       assert.equal(await contar("findings", "engagement_id=? AND affected_asset LIKE '8.8.8.8%'", [E.a]), 0);
       assert.equal(await contar("findings", "engagement_id=? AND affected_asset='10.10.2.1:445/tcp'", [E.a]), 1);
       assert.equal(await contar("evidences", "id=?", [r.json.evidencia_id]), 1);
-      assert.equal(await contar("agente_violaciones", "engagement_id=? AND tipo='importacion'", [E.a]), 2);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 2);
     });
     test("repetida, no duplica; con otra severidad mínima, filtra", async () => {
       assert.equal((await importar("escritura", xml(host("10.10.2.1", 445)))).json.duplicados, 1);

@@ -95,7 +95,8 @@ Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_expl
 ## Alcance
 
 - Un dominio vale solo para sí mismo. Los subdominios se cargan como `*.dominio`.
-- Una exclusión gana siempre. Un rango que toca una dirección excluida queda fuera entero.
+- Una exclusión gana siempre. Un rango que toca una dirección excluida queda fuera entero. Con `10.0.0.5:22` excluido, `10.0.0.5` sin puerto también queda fuera.
+- Una exclusión que no se entiende deja todo fuera hasta que se corrija. Cada IP o rango va completo: `10.0.0.5-20` o `10.0.0.0/24`, no `10.0.0.5,6,7`.
 - Una URL acota esquema, puerto y ruta.
 - Un log fuera de alcance se guarda, se marca y avisa en el panel. Un hallazgo fuera de alcance se rechaza.
 - Los formatos SARIF y Trivy no se importan: no dicen a qué equipo corresponden.
@@ -106,6 +107,8 @@ Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_expl
 - **Se controla el objetivo declarado**, no lo que dice el comando, y no se resuelve DNS.
 - **El ocultamiento es por patrones.** Reduce lo que llega al proveedor del modelo, no lo garantiza. Los objetivos y los nombres de archivo no se ocultan, y los comandos propios del arsenal salen como están.
 - **El contenido de las evidencias no se entrega**, solo sus datos.
+- **En el contenedor, `.claude` y `.config` persisten** y el agente puede escribirlos. Para empezar limpio: `docker compose -f agente/docker-compose.yml down -v`.
+- **Exportar e importar un engagement en ZIP** no conserva la marca de fuera de alcance ni la key de cada log.
 - **La key queda en la configuración del cliente.** Un agente con terminal puede leerla. Dale el nivel y los engagements justos, y revocala al terminar.
 
 ## Contenedor

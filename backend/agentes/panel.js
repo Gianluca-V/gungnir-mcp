@@ -149,9 +149,13 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
         if (!a.dentro) throw new ErrorHttp(409, `El activo ya no está en el alcance: ${a.motivo}`);
       }
       let findingId = p.finding_id;
-      if (p.accion === "crear") findingId = await H.insertar(tx, p.engagement_id, datos, req.user.id);
-      else {
-        const f = await tx.qRow("SELECT updated_at > ? AS cambio FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [p.creada_en, p.finding_id, p.engagement_id]);
+      if (p.accion === "crear") {
+        await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
+        const dup = await tx.qRow("SELECT id FROM findings WHERE engagement_id=? AND title=? AND affected_asset=? AND status<>'fixed' LIMIT 1 FOR UPDATE", [p.engagement_id, datos.title, datos.affected_asset]);
+        if (dup) throw new ErrorHttp(409, "Ya existe un hallazgo con ese título y ese activo: rechazá la propuesta.");
+        findingId = await H.insertar(tx, p.engagement_id, datos, req.user.id);
+      } else {
+        const f = await tx.qRow("SELECT updated_at >= ? AS cambio FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [p.creada_en, p.finding_id, p.engagement_id]);
         if (!f) throw new ErrorHttp(409, "El hallazgo que se quería modificar ya no existe.");
         if (f.cambio && !forzar) throw new ErrorHttp(409, "El hallazgo cambió después de la propuesta.", { conflicto: true });
         await H.modificar(tx, p.engagement_id, p.finding_id, datos);
