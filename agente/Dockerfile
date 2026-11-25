@@ -19,7 +19,7 @@ RUN apt-get update \
 COPY --from=mcp /mcp /opt/gungnir-mcp
 COPY agente/mcp.json agente/opencode.json /opt/agente/
 RUN install -d -o node -g node /trabajo /home/node/.claude /home/node/.config /home/node/.local /home/node/.cache
-ENV CLAUDE_CONFIG_DIR=/home/node/.claude OPENCODE_CONFIG=/opt/agente/opencode.json GUNGNIR_CARPETA=/trabajo DISABLE_AUTOUPDATER=1
+ENV CLAUDE_CONFIG_DIR=/home/node/.claude OPENCODE_CONFIG=/opt/agente/opencode.json GUNGNIR_CARPETA=/trabajo GUNGNIR_EN_CONTENEDOR=1 DISABLE_AUTOUPDATER=1
 USER node
 WORKDIR /trabajo
 CMD ["bash"]

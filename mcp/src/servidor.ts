@@ -148,8 +148,8 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, framework: z.enum(FRAMEWORKS).optional().describe('Por defecto, owasp_wstg'), estado: z.enum(['pending', 'tested', 'not_applicable']).optional(), ...pagina }, LEE,
     async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/metodologia`, { consulta }))
 
-  herramienta('ver_mapa', 'Ver mapa', 'Attack Map: equipos con sus puertos, sistema, si están comprometidos y desde cuál se llegó.', { engagement, ...pagina }, LEE,
-    async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/mapa`, { consulta }))
+  herramienta('ver_mapa', 'Ver mapa', 'Attack Map: equipos con sus puertos, sistema, si están comprometidos y desde cuál se llegó.', { engagement, completo: z.boolean().optional().describe('Notas enteras'), ...pagina }, LEE,
+    async ({ engagement: e, completo, ...consulta }) => cliente.pedir('GET', `${await base(e)}/mapa`, { consulta: { ...consulta, completo: completo ? 1 : undefined } }))
 
   herramienta('buscar_arsenal', 'Buscar en el arsenal', 'Comandos de referencia por texto, herramienta o fase. No los ejecuta.',
     { q: z.string().max(200).optional(), herramienta: z.string().max(100).optional(), fase: z.enum(['recon', 'scanning', 'exploitation', 'post_exploitation', 'general']).optional(), ...pagina, limite: pagina.limite.describe('Por defecto, 10') }, LEE,
@@ -248,8 +248,9 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
           const log = await cliente.pedir('POST', `${ruta}/logs`, { cuerpo: { fase: a.fase, objetivo, herramienta: a.herramienta, comando } })
             .catch((e: unknown) => {
               // Los logs anteriores ya quedaron: se dice cuáles son y que no corrió nada.
-              if (!(e instanceof ErrorGungnir)) throw e
-              throw new ErrorGungnir(`No se ejecutó: falló el registro de un objetivo. ${e.message}`, e.codigo, { ...e.detalle, logs_sin_ejecucion: logs })
+              const conocido = e instanceof ErrorGungnir ? e : null
+              if (!conocido) console.error('[gungnir-mcp] registro:', e instanceof Error ? e.message : e)
+              throw new ErrorGungnir(`No se ejecutó: falló el registro de un objetivo. ${conocido?.message ?? ''}`.trim(), conocido?.codigo ?? null, { ...conocido?.detalle, logs_sin_ejecucion: logs })
             })
           logs.push(log['id'])
           if (log['fuera_de_alcance'] === true) throw new ErrorGungnir('No se ejecutó: el registro marcó un objetivo como fuera de alcance.', null, { logs })

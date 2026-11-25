@@ -47,7 +47,7 @@ const claveDe = (n) => ubicar(n)?.valor ?? n.trim().toLowerCase();
 const canonico = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
 /** Si dos pedidos piden lo mismo, en cualquier orden. */
 function mismoPedido(a, b) {
-  const ordenar = ({ equipos }) => canonico(equipos.map((e) => canonico({ ...e, objetivo: claveDe(e.objetivo), puertos: (e.puertos || []).map(canonico).sort() })).sort());
+  const ordenar = ({ equipos }) => canonico(equipos.map((e) => canonico({ ...e, objetivo: claveDe(e.objetivo), ...(e.desde ? { desde: claveDe(e.desde) } : {}), puertos: (e.puertos || []).map(canonico).sort() })).sort());
   return ordenar(a) === ordenar(b);
 }
 
@@ -112,81 +112,93 @@ function objetivosDe({ objetivo, puertos }) {
 
 const nombresDe = (t) => [t.ip_address, t.fqdn, t.url_address].filter(Boolean);
 
-/** Lo guarda. Quien llama ya tomó el engagement, así dos pedidos iguales no se cruzan. */
+/**
+ * Lo guarda. Quien llama toma antes el engagement y no leyó nada sin bloqueo, así ve lo último que guardaron
+ * otros agentes. Una persona puede guardar a la vez: por eso cada cambio se condiciona a que siga vacío, y no
+ * se bloquea más que la fila que se toca.
+ */
 async function aplicar(tx, engagementId, { equipos }) {
-  // Con bloqueo: se ve lo último y, si una persona guarda a la vez, espera y lo suyo queda.
-  const filas = await tx.qRows("SELECT id,ip_address,fqdn,url_address,os_type,owned,jumped_from_id,notes FROM engagement_targets WHERE engagement_id=? ORDER BY created_at, id FOR UPDATE", [engagementId]);
+  const filas = await tx.qRows("SELECT id,ip_address,fqdn,url_address,os_type,owned,jumped_from_id,notes FROM engagement_targets WHERE engagement_id=? ORDER BY created_at, id", [engagementId]);
   const porNombre = new Map(), porId = new Map();
   const sumar = (t) => { porId.set(t.id, t); for (const n of nombresDe(t)) if (!porNombre.has(claveDe(n))) porNombre.set(claveDe(n), t); };
   filas.forEach(sumar);
   const r = { equipos_nuevos: 0, equipos_completados: 0, puertos_nuevos: 0, puertos_completados: 0, pivotes_nuevos: 0, conservados: [] };
+  /** Escribe una columna si sigue vacía. mysql2 cuenta las filas que cumplen la condición. */
+  const siVacia = async (tabla, columna, valor, id, vacia) => (await tx.qRun(`UPDATE ${tabla} SET ${columna}=? WHERE id=? AND ${vacia}`, [valor, id]))[0].affectedRows > 0;
   const pares = [];
   for (const e of equipos) {
+    const conservar = (campo) => r.conservados.push({ objetivo: e.objetivo, campo });
     const { columna, valor } = ubicar(e.objetivo);
-    let t = porNombre.get(valor);
+    let t = porNombre.get(valor), nuevo = false;
     if (!t) {
       if (porId.size >= TOPE_MAPA) throw new ErrorHttp(409, `El mapa ya tiene ${TOPE_MAPA} equipos.`);
       t = { id: uuidv4(), ip_address: null, fqdn: null, url_address: null, os_type: e.os_type || "other", owned: e.comprometido ? 1 : 0, jumped_from_id: null, notes: e.notas || null, [columna]: valor };
       await tx.qRun("INSERT INTO engagement_targets (id,engagement_id,ip_address,fqdn,url_address,os_type,notes,owned) VALUES (?,?,?,?,?,?,?,?)",
         [t.id, engagementId, t.ip_address, t.fqdn, t.url_address, t.os_type, t.notes, t.owned]);
       sumar(t);
+      nuevo = true;
       r.equipos_nuevos++;
     } else {
-      const cambios = {};
-      const completar = (columna2, campo, valor2, vacio) => {
-        if (!valor2 || t[columna2] === valor2) return;
-        if (vacio) cambios[columna2] = valor2; else r.conservados.push({ objetivo: e.objetivo, campo });
-      };
-      completar("os_type", "os_type", e.os_type, !t.os_type || t.os_type === "other");
-      completar("notes", "notas", e.notas, !t.notes);
-      if (e.comprometido && !t.owned) cambios.owned = 1;
-      const k = Object.keys(cambios);
-      if (k.length) {
-        await tx.qRun(`UPDATE engagement_targets SET ${k.map((c) => `${c}=?`).join(",")} WHERE id=?`, [...Object.values(cambios), t.id]);
-        Object.assign(t, cambios);
-        r.equipos_completados++;
+      let completado = false;
+      for (const [campo, columna2, v, vacia] of [["os_type", "os_type", e.os_type, "os_type='other'"], ["notas", "notes", e.notas, "(notes IS NULL OR notes='')"]]) {
+        if (!v || t[columna2] === v) continue;
+        if (await siVacia("engagement_targets", columna2, v, t.id, vacia)) { t[columna2] = v; completado = true; } else conservar(campo);
       }
+      if (e.comprometido && !t.owned && await siVacia("engagement_targets", "owned", 1, t.id, "owned=0")) { t.owned = 1; completado = true; }
+      if (completado) r.equipos_completados++;
     }
-    const estaban = new Map((e.puertos ? await tx.qRows("SELECT id,port_number,protocol,state,service_name,product,version FROM target_ports WHERE target_id=? FOR UPDATE", [t.id]) : []).map((p) => [`${p.port_number}/${p.protocol}`, p]));
-    for (const p of e.puertos || []) {
-      const nombre = `${p.puerto}/${p.protocolo}`, ya = estaban.get(nombre);
-      const conservar = (que) => r.conservados.push({ objetivo: e.objetivo, campo: `puerto ${nombre}: ${que}` });
-      if (!ya) {
-        await tx.qRun("INSERT INTO target_ports (id,target_id,engagement_id,port_number,protocol,service_name,product,version) VALUES (?,?,?,?,?,?,?,?)",
-          [uuidv4(), t.id, engagementId, p.puerto, p.protocolo, p.servicio ?? null, p.producto ?? null, p.version ?? null]);
-        r.puertos_nuevos++;
-        continue;
-      }
-      if (ya.state !== "open") { conservar(`estado ${ya.state}`); continue; }
-      const cambios = {};
-      for (const [k, columna2] of [["servicio", "service_name"], ["producto", "product"], ["version", "version"]]) {
-        if (!p[k] || p[k] === ya[columna2]) continue;
-        if (ya[columna2]) conservar(k); else cambios[columna2] = p[k];
-      }
-      const k = Object.keys(cambios);
-      if (!k.length) continue;
-      await tx.qRun(`UPDATE target_ports SET ${k.map((x) => `${x}=?`).join(",")} WHERE id=?`, [...Object.values(cambios), ya.id]);
-      r.puertos_completados++;
-    }
-    if (e.desde) pares.push([e, t]);
+    if (e.puertos?.length) await aplicarPuertos(tx, engagementId, t, nuevo, e.puertos, r, conservar, siVacia);
+    if (e.desde) pares.push([e, t, conservar]);
   }
   // Los pivotes van al final: el origen puede venir en el mismo pedido.
-  for (const [e, t] of pares) {
+  for (const [e, t, conservar] of pares) {
     const origen = porNombre.get(claveDe(e.desde));
     if (!origen) throw new ErrorHttp(422, `El origen del pivote a "${e.objetivo}" no está en el mapa: cargalo antes o en el mismo pedido.`);
     if (t.jumped_from_id) {
-      if (t.jumped_from_id !== origen.id) r.conservados.push({ objetivo: e.objetivo, campo: "desde" });
+      if (t.jumped_from_id !== origen.id) conservar("desde");
       continue;
     }
     for (let o = origen, vistos = new Set(); o && !vistos.has(o.id); o = porId.get(o.jumped_from_id)) {
       if (o.id === t.id) throw new ErrorHttp(422, `"${e.objetivo}" no puede salir de "${e.desde}": formaría un ciclo.`);
       vistos.add(o.id);
     }
-    await tx.qRun("UPDATE engagement_targets SET jumped_from_id=? WHERE id=?", [origen.id, t.id]);
-    t.jumped_from_id = origen.id;
-    r.pivotes_nuevos++;
+    if (await siVacia("engagement_targets", "jumped_from_id", origen.id, t.id, "jumped_from_id IS NULL").catch(seBorro)) {
+      t.jumped_from_id = origen.id;
+      r.pivotes_nuevos++;
+    } else conservar("desde");
   }
   return r;
+}
+
+/** Alguien borró el equipo mientras tanto: se deshace todo y se pide repetir. */
+function seBorro(e) {
+  if (String(e?.code).startsWith("ER_NO_REFERENCED_ROW")) throw new ErrorHttp(409, "El mapa cambió mientras se guardaba y no se guardó nada. Volvé a leerlo y repetí el pedido.");
+  throw e;
+}
+
+async function aplicarPuertos(tx, engagementId, t, nuevo, puertos, r, conservar, siVacia) {
+  const estaban = new Map((nuevo ? [] : await tx.qRows("SELECT id,port_number,protocol,state,service_name,product,version FROM target_ports WHERE target_id=?", [t.id])).map((p) => [`${p.port_number}/${p.protocol}`, p]));
+  for (const p of puertos) {
+    const nombre = `${p.puerto}/${p.protocolo}`, ya = estaban.get(nombre);
+    if (!ya) {
+      // Si alguien lo cargó recién, queda lo suyo y se completa lo que dejó vacío.
+      const lleno = (k) => `${k}=IF(state='open',COALESCE(NULLIF(${k},''),VALUES(${k})),${k})`;
+      await tx.qRun(
+        `INSERT INTO target_ports (id,target_id,engagement_id,port_number,protocol,service_name,product,version) VALUES (?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE ${["service_name", "product", "version"].map(lleno).join(",")}`,
+        [uuidv4(), t.id, engagementId, p.puerto, p.protocolo, p.servicio ?? null, p.producto ?? null, p.version ?? null]).catch(seBorro);
+      r.puertos_nuevos++;
+      continue;
+    }
+    if (ya.state !== "open") { conservar(`puerto ${nombre}: estado ${ya.state}`); continue; }
+    let completado = false;
+    for (const [k, columna] of [["servicio", "service_name"], ["producto", "product"], ["version", "version"]]) {
+      if (!p[k] || p[k] === ya[columna]) continue;
+      if (await siVacia("target_ports", columna, p[k], ya.id, `state='open' AND (${columna} IS NULL OR ${columna}='')`)) completado = true;
+      else conservar(`puerto ${nombre}: ${k}`);
+    }
+    if (completado) r.puertos_completados++;
+  }
 }
 
 module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, mismoPedido, canonico };

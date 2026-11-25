@@ -233,9 +233,11 @@ function evaluarPreparado(objetivo, si, no) {
   if (si.libres.has(normal(texto))) return { dentro: true, motivo: null };
   if (!si.red.length && !si.libres.size) return { dentro: false, motivo: "El engagement no tiene objetivos dentro de alcance." };
   if (!partes.length) return { dentro: false, motivo: "No se indicó un objetivo." };
+  // Una descripción de una persona ("srv-web (10.0.0.5) 443/tcp") no es un objetivo: no se puede juzgar.
+  const ilegible = partes.some(([, t]) => !t || (partes.length > 1 && t.host && !t.host.includes(".")));
   for (const [parte, t] of partes) {
-    if (!t) return { dentro: false, motivo: `No se puede interpretar el objetivo "${parte}".` };
-    if (!si.red.some((e) => cubre(e, t))) return { dentro: false, motivo: `"${parte}" no está en el alcance.` };
+    if (!t) return { dentro: false, ilegible, motivo: `No se puede interpretar el objetivo "${parte}".` };
+    if (!si.red.some((e) => cubre(e, t))) return { dentro: false, ilegible, motivo: `"${parte}" no está en el alcance.` };
   }
   return { dentro: true, motivo: null };
 }

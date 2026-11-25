@@ -10,13 +10,14 @@ const { canonico } = require("./mapa");
 const { evaluador } = require("./alcance");
 const { DIAS: ACTIVIDAD_DIAS } = require("./actividad");
 const { nuevaKey, hashDeKey } = require("./acceso");
-const { ErrorHttp, ruta, texto, opcion, entero } = require("./comun");
+const { ErrorHttp, ruta, texto, opcion, entero, reintentando, recortar } = require("./comun");
 
 const ESCRIBEN = ["admin", "auditor", "pentester"];
 const ADMINISTRAN = ["admin", "auditor"];
 const DIAS_POR_DEFECTO = 30;
 const DIAS_MAX = 365;
 const POR_PAGINA = 50;
+const PUERTOS_EN_LISTA = 20;
 
 function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar }) {
   const anotar = (req, accion, entidad, id, detalle) =>
@@ -145,8 +146,10 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
        ON DUPLICATE KEY UPDATE mostrar_sensibles=IF(COALESCE(?,nivel_max)='ninguno',0,COALESCE(?,IF(nivel_max='ninguno',0,mostrar_sensibles))), nivel_max=COALESCE(?,nivel_max), actualizado_por=VALUES(actualizado_por)`,
       ((v) => [e.id, nivel, v, req.user.id, nivel, v, nivel])(sensibles === undefined ? null : sensibles ? 1 : 0));
     if (sensibles) {
-      // Si alguien quitó el acceso en el medio, no se aplicó: ni se responde que sí ni se audita.
+      // Si alguien quitó el acceso en el medio, no se responde que sí y se audita lo que pasó: pudo estar
+      // visible un instante.
       const q = await qRow("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [e.id]);
+      if (!q?.mostrar_sensibles) await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: ${nivel ? `nivel ${nivel}, ` : ""}se pidió mostrar datos sensibles y otro cambio los dejó ocultos`);
       if (!q?.mostrar_sensibles) throw new ErrorHttp(409, "El acceso cambió mientras tanto y los datos siguen ocultos. Revisalo y volvé a intentar.");
     }
     await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: ${[nivel && `nivel ${nivel}`, sensibles !== undefined && `datos sensibles ${sensibles ? "visibles" : "ocultos"}`].filter(Boolean).join(", ")}`);
@@ -190,6 +193,19 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     res.json({ propuestas: Number(p.n), violaciones: Number(v.n), pausa: g?.pausado_en ? { desde: g.pausado_en, por: g.username } : null });
   }));
 
+  // La lista se pide seguido y puede traer 100 propuestas: los textos largos van enteros solo en el detalle.
+  function resumir(datos) {
+    const corto = (v) => (typeof v === "string" ? recortar(v, 4000) : v);
+    const { equipos, ...resto } = datos;
+    return {
+      ...Object.fromEntries(Object.entries(resto).map(([k, v]) => [k, corto(v)])),
+      ...(Array.isArray(equipos) ? { equipos: equipos.map((e) => ({
+        ...e, ...(e.notas ? { notas: recortar(e.notas, 600) } : {}),
+        ...(e.puertos ? { puertos: e.puertos.slice(0, PUERTOS_EN_LISTA), puertos_total: e.puertos.length } : {}),
+      })) } : {}),
+    };
+  }
+
   // ── Propuestas ──────────────────────────────────────────────────────────────
   app.get("/api/agentes/propuestas", auth(), ruta(async (req, res) => {
     const estado = opcion(req.query.estado, "estado", ["pendiente", "aprobada", "rechazada"]) || "pendiente";
@@ -198,7 +214,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
        FROM agente_propuestas p JOIN engagements e ON e.id=p.engagement_id
        LEFT JOIN users u ON u.id=p.decidida_por LEFT JOIN findings f ON f.id=p.finding_id
        WHERE p.estado=? ORDER BY p.creada_en DESC LIMIT 100`, [estado]);
-    res.json(filas.map((f) => ({ ...f, datos: comoObjeto(f.datos) })));
+    res.json(filas.map(({ huella, datos_aprobados, ...f }) => ({ ...f, datos: resumir(comoObjeto(f.datos)) })));
   }));
 
   app.get("/api/agentes/propuestas/:id", auth(), ruta(async (req, res) => {
@@ -208,6 +224,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     const datos = comoObjeto(p.datos);
     const a = await TIPOS[p.accion].actual({ qRow, qRows }, p, datos);
     if (a?.titulo) p.hallazgo_actual = a.titulo;
+    delete p.huella;
     res.json({ ...p, datos, actual: a?.actual ?? null, cambio: Boolean(a?.cambio) });
   }));
 
@@ -220,12 +237,13 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
   }
 
   async function aprobar(req, id, forzar, editados) {
-    const r = await transaccion(async (tx) => {
+    const r = await reintentando(() => transaccion(async (tx) => {
       const p = await tx.qRow("SELECT * FROM agente_propuestas WHERE id=? FOR UPDATE", [id]);
       if (!p) throw new ErrorHttp(404, "La propuesta no existe.");
       if (p.estado !== "pendiente") throw new ErrorHttp(409, `La propuesta ya fue ${p.estado}.`);
       const propuesto = comoObjeto(p.datos);
       const tipo = TIPOS[p.accion];
+      if (tipo.antes) await tipo.antes(tx, p);
       const datos = editados === undefined ? propuesto : tipo.validar(editados);
       const campos = camposEditados(propuesto, datos);
       const objetivos = tipo.objetivos(datos);
@@ -242,7 +260,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       await tx.qRun("UPDATE agente_propuestas SET estado='aprobada', finding_id=?, datos_aprobados=?, campos_editados=?, decidida_por=?, decidida_en=NOW() WHERE id=?",
         [findingId, campos.length ? JSON.stringify(datos) : null, campos.length ? JSON.stringify(campos) : null, req.user.id, id]);
       return { p, findingId, campos, despues, resultado };
-    });
+    }));
     await anotar(req, "agente_propuesta_aprobar", r.findingId ? "findings" : "engagements", r.findingId ?? r.p.engagement_id,
       `Propuesta de la key "${r.p.key_nombre}"${r.campos.length ? `. Editada: ${r.campos.join(", ")}` : ""}`);
     if (r.despues) await r.despues();

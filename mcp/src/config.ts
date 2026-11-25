@@ -10,8 +10,9 @@ export interface Config {
 }
 
 const FORMATO_KEY = /^gnga_[0-9a-f]{64}$/
-// host.docker.internal es el equipo donde corre el contenedor: no sale a la red.
-const LOCALES = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal'])
+const LOCALES = new Set(['localhost', '127.0.0.1', '[::1]'])
+// Adentro del contenedor es el equipo donde corre y no sale a la red. Afuera lo resuelve cualquier DNS.
+const ANFITRION = 'host.docker.internal'
 const FORMATO_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 
 /** Lee la configuración del entorno. Los errores nunca incluyen el valor de la key. */
@@ -22,7 +23,8 @@ export function leerConfig(env: NodeJS.ProcessEnv, carpetaActual: string): Confi
   try { url = new URL(cruda) } catch { throw new Error('GUNGNIR_URL no es una URL válida.') }
   if (url.username || url.password) throw new Error('GUNGNIR_URL no puede llevar usuario ni contraseña.')
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('GUNGNIR_URL tiene que ser http o https.')
-  if (url.protocol === 'http:' && !LOCALES.has(url.hostname) && env['GUNGNIR_PERMITIR_HTTP'] !== '1')
+  const local = LOCALES.has(url.hostname) || (url.hostname === ANFITRION && env['GUNGNIR_EN_CONTENEDOR'] === '1')
+  if (url.protocol === 'http:' && !local && env['GUNGNIR_PERMITIR_HTTP'] !== '1')
     throw new Error('GUNGNIR_URL usa http hacia otro equipo y la key viajaría sin cifrar. Usá https, o GUNGNIR_PERMITIR_HTTP=1 si la red es de confianza.')
 
   const apiKey = env['GUNGNIR_API_KEY']?.trim() ?? ''

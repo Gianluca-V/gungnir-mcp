@@ -2,6 +2,7 @@
 /**
  * Qué hace cada tipo de propuesta al aprobarse. Todos tienen:
  *
+ *   antes(tx, p)                opcional: lo que se bloquea antes de leer nada.
  *   validar(datos)              lo editado por la persona, con las mismas reglas que lo propuesto.
  *   objetivos(datos)            lo que tiene que seguir dentro del alcance.
  *   actual(q, p, datos)         lo que hay hoy, para comparar: { actual, cambio, titulo } o null.
@@ -15,18 +16,21 @@ const { ErrorHttp } = require("./comun");
 
 const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
 
+/** Si el hallazgo cambió desde que se propuso. Lo propuesto antes de guardar huella se mira por fecha. */
+const cambio = (p, f) => (p.huella ? p.huella !== H.huellaDe(f) : Boolean(f.posterior));
+const COLUMNAS = `id, engagement_id, updated_at >= ? AS posterior, ${H.COLUMNAS_HUELLA.join(", ")}`;
+
 /** El hallazgo de la propuesta, tomado para escribir. Avisa si cambió después de proponerse. */
 async function tomarHallazgo(tx, p, forzar) {
-  const f = await tx.qRow("SELECT id, engagement_id, title, severity, status, updated_at >= ? AS cambio FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [p.creada_en, p.finding_id, p.engagement_id]);
+  const f = await tx.qRow(`SELECT ${COLUMNAS} FROM findings WHERE id=? AND engagement_id=? FOR UPDATE`, [p.creada_en, p.finding_id, p.engagement_id]);
   if (!f) throw new ErrorHttp(409, "El hallazgo que se quería modificar ya no existe.");
   if (p.accion === "retest" && f.status === "accepted") throw retest.aceptado();
-  if (f.cambio && !forzar) throw new ErrorHttp(409, "El hallazgo cambió después de la propuesta.", { conflicto: true });
+  if (cambio(p, f) && !forzar) throw new ErrorHttp(409, "El hallazgo cambió después de la propuesta.", { conflicto: true });
   return f;
 }
-async function hallazgoActual(q, p, columnas) {
-  const f = await q.qRow(`SELECT updated_at >= ? AS cambio, title AS _titulo${columnas.map((k) => `, ${k}`).join("")} FROM findings WHERE id=? AND engagement_id=?`,
-    [p.creada_en, p.finding_id, p.engagement_id]);
-  return f && { f, cambio: Boolean(f.cambio), titulo: f._titulo };
+async function hallazgoActual(q, p) {
+  const f = await q.qRow(`SELECT ${COLUMNAS} FROM findings WHERE id=? AND engagement_id=?`, [p.creada_en, p.finding_id, p.engagement_id]);
+  return f && { f, cambio: cambio(p, f), titulo: f.title };
 }
 
 const TIPOS = {
@@ -46,7 +50,7 @@ const TIPOS = {
     objetivos: (d) => (d.affected_asset ? [d.affected_asset] : []),
     async actual(q, p, datos) {
       const campos = Object.keys(datos).filter((k) => H.CAMPOS.includes(k));
-      const a = await hallazgoActual(q, p, campos);
+      const a = await hallazgoActual(q, p);
       return a && { ...a, actual: Object.fromEntries(campos.map((k) => [k, k === "references_list" && a.f[k] ? comoObjeto(a.f[k]) : a.f[k]])) };
     },
     async aplicar(tx, p, datos, { forzar }) {
@@ -59,7 +63,7 @@ const TIPOS = {
     validar: (d) => retest.validar(d),
     objetivos: (d) => [d.objetivo],
     async actual(q, p) {
-      const a = await hallazgoActual(q, p, ["affected_asset", "retest_status", "retest_severity", "retest_notes"]);
+      const a = await hallazgoActual(q, p);
       return a && { ...a, actual: { resultado: a.f.retest_status, objetivo: a.f.affected_asset, retest_severity: a.f.retest_severity, notas: a.f.retest_notes } };
     },
     async aplicar(tx, p, datos, { userId, forzar, deps, persona }) {
@@ -69,11 +73,12 @@ const TIPOS = {
     },
   },
   mapa: {
+    // Primero: si se leyera algo antes, no se vería lo que otro agente guardó mientras se esperaba.
+    antes: (tx, p) => tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]),
     validar: (d) => mapa.validar(d),
     objetivos: (d) => d.equipos.flatMap(mapa.objetivosDe),
     actual: async () => null,
     async aplicar(tx, p, datos) {
-      await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
       return { findingId: null, resultado: await mapa.aplicar(tx, p.engagement_id, datos) };
     },
   },

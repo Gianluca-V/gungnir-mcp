@@ -158,7 +158,7 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
       const suyos = porEquipo.get(t.id) || [];
       return { id: t.id, objetivos: nombresDeEquipo(t), os_type: t.os_type, comprometido: Boolean(t.owned), desde: t.desde, notas: t.notes,
         puertos: suyos.slice(0, PUERTOS_POR_EQUIPO), ...(suyos.length > PUERTOS_POR_EQUIPO ? { puertos_total: suyos.length } : {}) };
-    }), { max: LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null });
+    }), { max: req.query.completo === "1" ? LARGO_COMPLETO : LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null });
   }));
 
   // ── Logs, evidencias y técnicas ─────────────────────────────────────────────

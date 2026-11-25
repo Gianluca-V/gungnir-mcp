@@ -65,6 +65,8 @@ export interface EquipoMapa {
     producto?: string
     version?: string
   }[]
+  /** Solo en la lista, que no trae todos. */
+  puertos_total?: number
 }
 
 export interface DetallePropuesta extends Propuesta {

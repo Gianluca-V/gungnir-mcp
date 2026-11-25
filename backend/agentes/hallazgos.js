@@ -1,5 +1,6 @@
 "use strict";
 /** Alta y modificación de hallazgos para agentes: campos permitidos, validación y escritura. */
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const { ErrorHttp, texto, opcion, tieneRecorte } = require("./comun");
 const { tieneMarcas } = require("./ocultar");
@@ -57,6 +58,10 @@ function validar(b, { alta }) {
   return d;
 }
 
+// Lo que, si cambia, hace que una propuesta sobre el hallazgo se tenga que mirar de nuevo.
+const COLUMNAS_HUELLA = [...CAMPOS, "remediation_due_date", "retest_status", "retest_severity", "retest_notes", "retested_at", "risk_accepted_reason", "risk_accepted_at"];
+const huellaDe = (f) => crypto.createHash("sha256").update(JSON.stringify(COLUMNAS_HUELLA.map((k) => f[k] ?? null))).digest("hex");
+
 const aColumna = (k, v) => (k === "references_list" && v ? JSON.stringify(v) : v ?? null);
 
 async function insertar(tx, engagementId, datos, userId) {
@@ -87,12 +92,12 @@ async function buscarDuplicado(q, engagementId, { title, affected_asset }) {
   return p ? { tipo: "propuesta", id: p.id } : null;
 }
 
-async function proponer(tx, { engagementId, agente, accion, findingId = null, datos }) {
+async function proponer(tx, { engagementId, agente, accion, findingId = null, datos, huella = null }) {
   const id = uuidv4();
   await tx.qRun(
-    "INSERT INTO agente_propuestas (id,engagement_id,key_id,key_nombre,accion,finding_id,datos) VALUES (?,?,?,?,?,?,?)",
-    [id, engagementId, agente.keyId, agente.keyNombre, accion, findingId, JSON.stringify(datos)]);
+    "INSERT INTO agente_propuestas (id,engagement_id,key_id,key_nombre,accion,finding_id,datos,huella) VALUES (?,?,?,?,?,?,?,?)",
+    [id, engagementId, agente.keyId, agente.keyNombre, accion, findingId, JSON.stringify(datos), huella]);
   return id;
 }
 
-module.exports = { FASES, SEVERIDADES, ESTADOS, CAMPOS, validar, exigirSinMarcas, insertar, modificar, buscarDuplicado, proponer };
+module.exports = { FASES, SEVERIDADES, ESTADOS, CAMPOS, COLUMNAS_HUELLA, huellaDe, validar, exigirSinMarcas, insertar, modificar, buscarDuplicado, proponer };

@@ -17,7 +17,7 @@ const mapa = require("./mapa");
 const retest = require("./retest");
 const { comoObjeto } = require("./aprobacion");
 const { evaluar, evaluador } = require("./alcance");
-const { ErrorHttp, ruta, texto, opcion } = require("./comun");
+const { ErrorHttp, ruta, texto, opcion, reintentando } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
 // El tipo sale de la extensión, no de lo que declara quien sube. Sin HTML ni SVG: ejecutan código
@@ -31,7 +31,7 @@ const MB = 1024 * 1024;
 const VENTANA_EN_CURSO_MIN = 10;
 const TOPE_VIOLACIONES = 50;
 
-function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, carpeta }) {
+function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, notificar, carpeta }) {
   const con = acceso.conEngagement;
   const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * MB, files: 1, fields: 20 } });
   const recibir = (req, res, next) => subida.single("archivo")(req, res, (e) => {
@@ -43,7 +43,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     auditLog(req.agente.userId, req.agente.username, `agente_${accion}`, entidad, id, `[key ${req.agente.keyNombre}] ${detalle || ""}`.slice(0, 2000), req.ip);
   /** Pone en fila las altas de un engagement, para que dos iguales a la vez no pasen el control de duplicados. */
   const enFila = (tx, id) => tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [id]);
-  const alcanceDe = (q, id) => q.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [id]);
+  const alcanceDe = (q, id) => q.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=? ORDER BY id", [id]);
 
   // Adentro de una transacción solo se usa su conexión: pedir otra al pool puede trabarlo entero.
   async function violacion(q, req, { tipo, logId = null, objetivo, motivo }) {
@@ -56,8 +56,9 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
    * Corre `fn(tx)` en una transacción y responde lo que devuelve: { codigo, cuerpo, despues }.
    * Con `Idempotency-Key`, un reintento recibe la misma respuesta sin volver a escribir: la respuesta
    * se guarda en la misma transacción que los datos, así no puede quedar una cosa sin la otra.
+   * `preparar(req)` corre antes de la transacción: es para lo que tarda y no necesita bloquear nada.
    */
-  const escribir = (fn) => ruta(async (req, res) => {
+  const escribir = (fn, preparar = null) => ruta(async (req, res) => {
     const clave = texto(req.headers["idempotency-key"], "Idempotency-Key", { max: 100 });
     let huella = null;
     if (clave) {
@@ -67,16 +68,18 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
       if (previa) { res.set("Idempotency-Replayed", "true"); return res.status(previa.codigo).json(previa.cuerpo); }
     }
     let r;
+    const borrarArchivos = async () => { for (const a of req.archivosEscritos || []) await fs.promises.unlink(path.join(carpeta, a)).catch(() => {}); req.archivosEscritos = []; };
     try {
-      r = await transaccion(async (tx) => {
-        const out = await fn(req, tx);
+      const preparado = preparar ? await preparar(req) : null;
+      r = await reintentando(() => transaccion(async (tx) => {
+        const out = await fn(req, tx, preparado);
         await acceso.exigirSinPausa(tx, req.engagement.id);
         if (clave) await tx.qRun("UPDATE agente_idempotencia SET lista=1, codigo=?, respuesta=? WHERE key_id=? AND clave=?", [out.codigo, JSON.stringify(out.cuerpo), req.agente.keyId, clave]);
         return out;
-      });
+      }), async () => { await borrarArchivos(); req.violaciones = []; });
     } catch (e) {
       // La transacción se deshizo: los archivos que alcanzó a guardar no quedan sueltos.
-      for (const a of req.archivosEscritos || []) await fs.promises.unlink(path.join(carpeta, a)).catch(() => {});
+      await borrarArchivos();
       req.violaciones = [];
       await sinFallar("registrar lo rechazado", async () => {
         // Lo rechazado por alcance deja constancia aunque el pedido se haya deshecho.
@@ -136,9 +139,9 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
   }));
 
   // ── Hallazgos ───────────────────────────────────────────────────────────────
-  const exigirActivoEnAlcance = async (tx, req, activo, { que = "El hallazgo", campo = "affected_asset" } = {}) => {
+  const exigirActivoEnAlcance = async (tx, req, activo, { que = "El hallazgo", campo = "affected_asset", admiteIlegible = false } = {}) => {
     const a = evaluar(activo, await alcanceDe(tx, req.engagement.id));
-    if (a.dentro) return;
+    if (a.dentro || (admiteIlegible && a.ilegible)) return;
     const e = new ErrorHttp(422, `${que} se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "${campo}" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
     e.violaciones = [{ tipo: "hallazgo", objetivo: activo, motivo: a.motivo }];
     throw e;
@@ -164,12 +167,14 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
 
   router.put("/engagements/:id/hallazgos/:fid", con("propuesta"), escribir(async (req, tx) => {
     const datos = H.validar(req.body, { alta: false });
-    const f = await tx.qRow("SELECT id, title, status FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [req.params.fid, req.engagement.id]);
+    const f = await tx.qRow(`SELECT id, ${H.COLUMNAS_HUELLA.join(", ")} FROM findings WHERE id=? AND engagement_id=? FOR UPDATE`, [req.params.fid, req.engagement.id]);
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
     if (f.status === "accepted" && datos.status) throw new ErrorHttp(409, "Una persona aceptó el riesgo de este hallazgo: su estado no se cambia desde acá.");
+    // Sin activo nuevo vale el que tiene. Uno que escribió una persona y no es un objetivo no se puede juzgar.
     if (datos.affected_asset) await exigirActivoEnAlcance(tx, req, datos.affected_asset);
+    else if (f.affected_asset) await exigirActivoEnAlcance(tx, req, f.affected_asset, { que: "El cambio", admiteIlegible: true });
     if (!N.alcanza(req.engagement.nivel, "escritura")) {
-      const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "actualizar", findingId: f.id, datos });
+      const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "actualizar", findingId: f.id, datos, huella: H.huellaDe(f) });
       return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El cambio queda a la espera de aprobación." },
         despues: () => anotar(req, "propuesta", "agente_propuestas", id, `cambio en ${f.title}`) };
     }
@@ -178,14 +183,14 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
   }));
 
   router.post("/engagements/:id/hallazgos/:fid/retest", con("propuesta"), escribir(async (req, tx) => {
-    const f = await tx.qRow("SELECT id, title, status, affected_asset FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [req.params.fid, req.engagement.id]);
+    const f = await tx.qRow(`SELECT id, ${H.COLUMNAS_HUELLA.join(", ")} FROM findings WHERE id=? AND engagement_id=? FOR UPDATE`, [req.params.fid, req.engagement.id]);
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
     const datos = retest.validar(req.body, f.affected_asset);
     if (f.status === "accepted") throw retest.aceptado();
     await exigirActivoEnAlcance(tx, req, datos.objetivo, { que: "El retest", campo: "objetivo" });
     const dup = await tx.qRow("SELECT id FROM agente_propuestas WHERE finding_id=? AND accion='retest' AND estado='pendiente' LIMIT 1", [f.id]);
     if (dup) throw new ErrorHttp(409, "Ese hallazgo ya tiene un retest pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
-    const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "retest", findingId: f.id, datos });
+    const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "retest", findingId: f.id, datos, huella: H.huellaDe(f) });
     return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El retest lo aprueba una persona en el panel, en cualquier nivel." },
       despues: () => anotar(req, "propuesta", "agente_propuestas", id, `retest ${datos.resultado} de ${f.title}`) };
   }));
@@ -243,15 +248,21 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
   }));
 
   // ── Importación de escaneos ─────────────────────────────────────────────────
-  router.post("/engagements/:id/importar", con("propuesta"), recibir, escribir(async (req, tx) => {
+  // Leer y clasificar un archivo grande tarda segundos: se hace antes de tomar el engagement, y solo se
+  // repite adentro si el alcance cambió en el medio.
+  const prepararImportacion = async (req) => {
     if (!req.file) throw new ErrorHttp(400, `Falta el archivo (campo "archivo").`);
     const formato = opcion(req.body.formato, "formato", importacion.FORMATOS, { obligatorio: true });
     const minima = opcion(req.body.severidad_minima, "severidad_minima", H.SEVERIDADES) || "info";
     const fase = opcion(req.body.fase, "fase", H.FASES) || "scanning";
     const leidos = importacion.leer(formato, req.file.buffer.toString("utf8"));
+    const items = await alcanceDe({ qRows }, req.engagement.id);
+    return { formato, minima, fase, leidos, items, clasificado: await importacion.clasificar(leidos, items, minima) };
+  };
+  router.post("/engagements/:id/importar", con("propuesta"), recibir, escribir(async (req, tx, { formato, minima, fase, leidos, items, clasificado }) => {
     await enFila(tx, req.engagement.id);
-    const items = await alcanceDe(tx, req.engagement.id);
-    const { aceptados, fuera, bajoMinimo, sinEquipo } = await importacion.clasificar(leidos, items, minima);
+    const ahora = await alcanceDe(tx, req.engagement.id);
+    const { aceptados, fuera, bajoMinimo, sinEquipo } = JSON.stringify(ahora) === JSON.stringify(items) ? clasificado : await importacion.clasificar(leidos, ahora, minima);
     const fueraDeAlcance = [...fuera].slice(0, TOPE_VIOLACIONES).map(([objetivo, motivo]) => ({ tipo: "importacion", objetivo, motivo }));
     if (fuera.size > TOPE_VIOLACIONES)
       fueraDeAlcance.push({ tipo: "importacion", objetivo: `${fuera.size - TOPE_VIOLACIONES} equipos más`, motivo: `El archivo trae ${fuera.size} equipos fuera de alcance.` });
@@ -287,7 +298,7 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
       // Sin avisos por hallazgo, igual que la importación del panel: un escaneo mandaría cientos.
       despues: () => anotar(req, "importar", "findings", req.engagement.id, `${formato}: ${creados.length} de ${leidos.length}`),
     };
-  }));
+  }, prepararImportacion));
 
   // ── Attack Map ──────────────────────────────────────────────────────────────
   router.post("/engagements/:id/mapa", con("propuesta"), escribir(async (req, tx) => {

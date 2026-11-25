@@ -39,6 +39,13 @@ export function Equipo({ e }: { e: EquipoMapa }) {
               {[p.servicio, p.producto, p.version].filter(Boolean).join(' ')}
             </li>
           ))}
+          {(e.puertos_total ?? 0) > e.puertos.length && (
+            <li className='text-muted-foreground'>
+              {t('agentes.map.more_ports', {
+                count: (e.puertos_total ?? 0) - e.puertos.length,
+              })}
+            </li>
+          )}
         </ul>
       )}
       {e.notas && (
@@ -62,7 +69,11 @@ export function FormularioMapa({ detalle, ocupado, cerrar, aprobar }: Props) {
   const { t } = useTranslation()
   const equipos = equiposDe(detalle.datos)
   const [sacados, setSacados] = useState<Set<string>>(new Set())
-  const quedan = equipos.filter((e) => !sacados.has(e.objetivo))
+  // Un equipo cuyo origen se sacó va sin él: si no, el pedido entero se rechaza.
+  const sinOrigen = (e: EquipoMapa) => !!e.desde && sacados.has(e.desde)
+  const quedan = equipos
+    .filter((e) => !sacados.has(e.objetivo))
+    .map((e) => (sinOrigen(e) ? { ...e, desde: undefined } : e))
 
   function alternar(objetivo: string, incluir: boolean) {
     const s = new Set(sacados)
@@ -87,7 +98,14 @@ export function FormularioMapa({ detalle, ocupado, cerrar, aprobar }: Props) {
                 disabled={ocupado}
                 onCheckedChange={(v) => alternar(e.objetivo, v === true)}
               />
-              <Equipo e={e} />
+              <div className='min-w-0'>
+                <Equipo e={e} />
+                {sinOrigen(e) && !sacados.has(e.objetivo) && (
+                  <p className='mt-1 text-xs text-amber-800 dark:text-amber-400'>
+                    {t('agentes.map.no_origin')}
+                  </p>
+                )}
+              </div>
             </Label>
           </li>
         ))}

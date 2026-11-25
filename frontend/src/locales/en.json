@@ -2322,6 +2322,9 @@
       }
     },
     "map": {
+      "more_ports_one": "and {{count}} more port",
+      "more_ports_other": "and {{count}} more ports",
+      "no_origin": "It goes without its origin, which you removed.",
       "conserved_one": "{{count}} value was not applied: the map already had another.",
       "conserved_other": "{{count}} values were not applied: the map already had others.",
       "title_one": "{{count}} host for the Attack Map",

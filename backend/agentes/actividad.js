@@ -55,26 +55,26 @@ function crear({ qRun }) {
   const fallo = (e) => console.error("[GUNGNIR] Agentes: no se pudo anotar la actividad:", e?.message);
   const ultimas = new Map(); // Por key: la última fila, para agrupar, y cuántos rechazos van en la ventana.
   const colas = new Map(); // Por key: lo pendiente, para no cruzar dos anotaciones.
+  // Poco después de arrancar, con las tablas ya creadas, y una vez por día: también sin uso.
+  setTimeout(() => limpiar(qRun).catch(fallo), 60 * 1000).unref();
   setInterval(() => limpiar(qRun).catch(fallo), DIA_MS).unref();
-  let limpieza = false;
 
   async function anotar(f) {
     const ahora = Date.now(), rechazo = f.codigo >= 400;
     let u = ultimas.get(f.keyId);
     if (!u || ahora - u.desde > AGRUPAR_MS) u = { desde: ahora, rechazos: 0, firma: null, id: null, resto: null };
     ultimas.set(f.keyId, u);
-    const repetir = (id) => qRun("UPDATE agente_actividad SET veces=veces+1, ultima_en=NOW() WHERE id=?", [id]);
+    const repetir = (id, fuera = false) => qRun("UPDATE agente_actividad SET veces=veces+1, ultima_en=NOW(), fuera=GREATEST(fuera,?) WHERE id=?", [fuera ? 1 : 0, id]);
     const firma = JSON.stringify([f.accion, f.codigo, f.engagementId, f.objetivo, f.detalle, f.fuera]);
     if (rechazo && u.firma === firma) return repetir(u.id);
     const deMas = rechazo && u.rechazos >= RECHAZOS_POR_VENTANA;
-    if (deMas && u.resto) return repetir(u.resto);
-    if (deMas) Object.assign(f, { accion: "otra", engagementId: null, objetivo: null, detalle: "Más rechazos distintos en pocos minutos, sin detallar.", fuera: false });
+    if (deMas && u.resto) return repetir(u.resto, f.fuera);
+    if (deMas) Object.assign(f, { accion: "otra", engagementId: null, objetivo: null, detalle: "Más rechazos distintos en pocos minutos, sin detallar." });
     const [r] = await qRun(
       "INSERT INTO agente_actividad (key_id,engagement_id,accion,codigo,objetivo,detalle,ref_id,fuera) VALUES (?,?,?,?,?,?,?,?)",
       [f.keyId, f.engagementId, f.accion, f.codigo, f.objetivo, f.detalle, f.refId, f.fuera ? 1 : 0]);
     if (deMas) u.resto = r.insertId;
     else Object.assign(u, { firma, id: r.insertId, rechazos: u.rechazos + (rechazo ? 1 : 0) });
-    if (!limpieza) { limpieza = true; await limpiar(qRun); } // Con la primera anotación del proceso; después, una vez por día.
   }
 
   /** Anota al responder, y no al terminar de enviar: si el cliente cortó, la escritura se hizo igual. */

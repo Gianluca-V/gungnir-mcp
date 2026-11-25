@@ -36,11 +36,23 @@ function montar(app, deps) {
   const notificar = (id, titulo) => avisarSeguro(id, () => ({ name: escaparHtml(titulo) }));
 
   const router = express.Router();
-  router.use(acceso.limitePorIp, actividad.crear({ qRun }).registrar, acceso.autenticar, acceso.limitePorKey, acceso.sinPausa);
+  const entrada = [acceso.limitePorIp, actividad.crear({ qRun }).registrar, acceso.autenticar, acceso.limitePorKey, acceso.sinPausa];
+  router.use(...entrada);
   lectura.montar(router, { ...deps, acceso, buscarCve: cve.crear(), explotacion: cve.crearExplotacion({ qRow }) });
   escritura.montar(router, { ...deps, acceso, notificar });
   router.use((req, res) => res.status(404).json({ error: "Ruta inexistente." }));
   app.use(BASE, router);
+
+  // Un cuerpo ilegible falla antes de llegar al router: igual se autentica, gasta cupo y queda en la actividad.
+  const ilegible = express.Router();
+  ilegible.use(...entrada);
+  ilegible.use((req, res) => res.status(req.errorDeCuerpo.codigo).json({ error: req.errorDeCuerpo.mensaje }));
+  app.use(BASE, (err, req, res, next) => {
+    if (!/^(entity|encoding|charset|request)\./.test(err?.type || "")) return next(err);
+    const codigo = err.status >= 400 && err.status < 500 ? err.status : 400;
+    req.errorDeCuerpo = { codigo, mensaje: codigo === 413 ? "El pedido supera los 2 MB. Subí lo grande como evidencia." : err.type === "entity.parse.failed" ? "JSON inválido en el cuerpo del pedido." : "El cuerpo del pedido no se puede leer." };
+    ilegible(req, res, next);
+  });
 
   panel.montar(app, { ...deps, notificar: (id, engagementId) => avisarSeguro(id, async () => {
     const e = await qRow("SELECT title FROM engagements WHERE id=?", [engagementId]);

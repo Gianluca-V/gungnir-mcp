@@ -8,6 +8,7 @@
         "GUNGNIR_API_KEY": "${GUNGNIR_API_KEY}",
         "GUNGNIR_ENGAGEMENT": "${GUNGNIR_ENGAGEMENT:-}",
         "GUNGNIR_PERMITIR_HTTP": "${GUNGNIR_PERMITIR_HTTP:-}",
+        "GUNGNIR_EN_CONTENEDOR": "1",
         "GUNGNIR_CARPETA": "/trabajo"
       }
     }

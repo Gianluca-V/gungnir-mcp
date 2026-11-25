@@ -81,6 +81,8 @@ async function crearTablas({ qRun }) {
   // Lo que la persona corrigió al aprobar. `datos` sigue siendo lo que propuso el agente.
   await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN datos_aprobados JSON NULL");
   await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN campos_editados JSON NULL");
+  // Cómo estaba el hallazgo al proponer, para saber si cambió.
+  await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN huella CHAR(64) NULL");
 
   await qRun(`CREATE TABLE IF NOT EXISTS agente_violaciones (
     id VARCHAR(36) PRIMARY KEY,

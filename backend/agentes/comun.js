@@ -44,6 +44,21 @@ function entero(v, campo, { min, max, porDefecto }) {
   return n;
 }
 
+const INTENTOS = 4;
+/**
+ * Repite `fn` si la base la eligió como víctima de un bloqueo mutuo: la transacción ya se deshizo entera.
+ * `alReintentar` limpia lo que haya quedado fuera de ella.
+ */
+async function reintentando(fn, alReintentar = async () => {}) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (e?.code !== "ER_LOCK_DEADLOCK" || i === INTENTOS) throw e;
+      await alReintentar();
+      await new Promise((ok) => setTimeout(ok, 20 * i + Math.random() * 40));
+    }
+  }
+}
+
 const MARCA_RECORTE = "[RECORTADO:";
 function recortar(s, max) {
   if (typeof s !== "string" || s.length <= max) return s;
@@ -55,4 +70,4 @@ function tieneRecorte(v) {
   return false;
 }
 
-module.exports = { ErrorHttp, ruta, texto, opcion, entero, recortar, tieneRecorte };
+module.exports = { ErrorHttp, ruta, texto, opcion, entero, reintentando, recortar, tieneRecorte };

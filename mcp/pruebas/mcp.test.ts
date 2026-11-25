@@ -32,7 +32,11 @@ describe('configuración', () => {
   for (const [n, x] of malas)
     test(`rechaza ${n} sin mostrar la key`, () => assert.throws(() => leerConfig(env(x), '/tmp'), (e: Error) => !e.message.includes('secreta') && !e.message.includes('aaaa')))
   test('una variable vacía vale como no puesta', () => assert.equal(leerConfig(env({ GUNGNIR_TIEMPO_SEGUNDOS: '', GUNGNIR_ENGAGEMENT: '' }), '/tmp').tiempoMs, 30000))
-  test('http hacia el equipo anfitrión del contenedor cuenta como local', () => assert.ok(leerConfig(env({ GUNGNIR_URL: 'http://host.docker.internal:3006' }), '/tmp')))
+  test('🔴 http hacia el equipo anfitrión solo cuenta como local adentro del contenedor', () => {
+    assert.ok(leerConfig(env({ GUNGNIR_URL: 'http://host.docker.internal:3006', GUNGNIR_EN_CONTENEDOR: '1' }), '/tmp'))
+    assert.throws(() => leerConfig(env({ GUNGNIR_URL: 'http://host.docker.internal:3006' }), '/tmp'), /sin cifrar/)
+    assert.throws(() => leerConfig(env({ GUNGNIR_URL: 'http://10.0.0.5:3006', GUNGNIR_EN_CONTENEDOR: '1' }), '/tmp'), /sin cifrar/)
+  })
   test('http hacia otro equipo se admite si se pide', () => assert.ok(leerConfig(env({ GUNGNIR_URL: 'http://gungnir:3006', GUNGNIR_PERMITIR_HTTP: '1' }), '/tmp')))
 })
 
@@ -232,7 +236,7 @@ describe('servidor MCP', () => {
       ['ver_hallazgo', { id: E2 }, `GET /hallazgos/${E2}`], ['ver_metodologia', {}, 'GET /metodologia'], ['registrar_log', { fase: 'recon', notas: 'x' }, 'POST /logs'],
       ['crear_hallazgo', { title: 'a', affected_asset: 'b' }, 'POST /hallazgos'], ['modificar_hallazgo', { id: E2, title: 'x' }, `PUT /hallazgos/${E2}`],
       ['marcar_metodologia', { item: 'WSTG-INFO-01', estado: 'tested' }, 'PUT /metodologia/WSTG-INFO-01'], ['registrar_tecnica', { nombre: 'x' }, 'POST /tecnicas'],
-      ['borrar', { tipo: 'logs', id: E2 }, `DELETE /logs/${E2}`], ['ver_mapa', {}, 'GET /mapa'], ['registrar_mapa', { equipos: [{ objetivo: 'a', puertos: [{ puerto: 22 }] }] }, 'POST /mapa'], ['proponer_retest', { id: E2, resultado: 'passed', notas: 'x' }, `POST /hallazgos/${E2}/retest`],
+      ['borrar', { tipo: 'logs', id: E2 }, `DELETE /logs/${E2}`], ['ver_mapa', { completo: true }, 'GET /mapa'], ['registrar_mapa', { equipos: [{ objetivo: 'a', puertos: [{ puerto: 22 }] }] }, 'POST /mapa'], ['proponer_retest', { id: E2, resultado: 'passed', notas: 'x' }, `POST /hallazgos/${E2}/retest`],
     ]
     for (const [n, a, e] of casos) {
       const r = await x.llamar(n, a as Record<string, unknown>); assert.ok(!r.error, r.texto)
@@ -302,6 +306,15 @@ describe('servidor MCP', () => {
       const r = await x.llamar('ejecutar_herramienta', { ...args, objetivos: ['10.0.0.1', '10.0.0.2'] })
       assert.ok(r.error); assert.equal(h.length, 0)
       assert.match(r.texto, /No se ejecutó[\s\S]*caído[\s\S]*log-uno/)
+    })
+    test('🔴 un error inesperado a mitad de los registros también dice cuáles quedaron, sin datos internos', async () => {
+      const h: unknown[] = []
+      let n = 0
+      const x = await armar((p) => { if (!p.ruta.endsWith('/logs')) return { todos_dentro: true }; if (++n === 2) throw new Error('C:/interno/secreto'); return { id: 'log-uno', fuera_de_alcance: false } },
+        { engagement: E1, ejecutor: ejecutor(h) })
+      const r = await x.llamar('ejecutar_herramienta', { ...args, objetivos: ['10.0.0.1', '10.0.0.2'] })
+      assert.ok(r.error); assert.equal(h.length, 0)
+      assert.match(r.texto, /No se ejecutó[\s\S]*log-uno/); assert.doesNotMatch(r.texto, /interno/)
     })
     test('🔴 el motivo por el que el ejecutor rechaza un pedido llega al agente', async () => {
       const x = await armar((p) => (p.ruta.endsWith('/logs') ? { id: 'l1', fuera_de_alcance: false } : { todos_dentro: true }),

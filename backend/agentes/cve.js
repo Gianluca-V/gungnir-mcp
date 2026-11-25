@@ -104,7 +104,7 @@ function crearExplotacion({ qRow, descargar = E.descargarTexto, habilitada = E.h
       kev: k === null ? null : Boolean(k), ...(k ? { kev_desde: P.ymd(k.alta), kev_vence: P.ymd(k.vence), ransomware: Number(k.ransomware) === 1 ? true : null } : {}),
       epss, epss_percentil: e.dato?.percentil ?? null, epss_fecha: e.dato?.fecha ?? null,
       prioridad: k || severidad ? P.prioridad({ severidad, epss, kev: k ? 1 : 0 }) : null,
-      ...(avisos.length ? { avisos } : {}),
+      ...(avisos.length ? { prioridad_parcial: true, avisos } : {}),
     };
   };
 }

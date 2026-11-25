@@ -2322,6 +2322,9 @@
       }
     },
     "map": {
+      "more_ports_one": "y {{count}} puerto más",
+      "more_ports_other": "y {{count}} puertos más",
+      "no_origin": "Va sin su origen, que sacaste.",
       "conserved_one": "{{count}} dato no se aplicó: el mapa ya tenía otro.",
       "conserved_other": "{{count}} datos no se aplicaron: el mapa ya tenía otros.",
       "title_one": "{{count}} equipo para el Attack Map",

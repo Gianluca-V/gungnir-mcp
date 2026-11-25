@@ -30,6 +30,7 @@ const inventarioCommunity = require("./inventario-community");
 const vulnerabilidades    = require("./vulnerabilidades");
 const agentes             = require("./agentes");
 const retest = require("./retest");
+const { reintentando } = require("./agentes/comun");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -75,7 +76,8 @@ const db = mysql.createPool({
 
 const qRows = async (sql, p) => { const [r] = await db.execute(sql, p||[]); return r; };
 const qRow  = async (sql, p) => { const r = await qRows(sql, p); return r[0]||null; };
-const qRun  = (sql, p)       => db.execute(sql, p||[]);
+// Una sentencia sola que la base eligió como víctima de un bloqueo mutuo se deshizo entera: se repite.
+const qRun  = (sql, p)       => reintentando(() => db.execute(sql, p||[]));
 
 /**
  * Corre `fn` dentro de una transacción, con una conexión propia del pool. `fn` recibe

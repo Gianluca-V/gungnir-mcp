@@ -112,7 +112,8 @@ function parsearEpss(json) {
   const out = [];
   for (const f of o.data) {
     const cve = String(f?.cve || "").trim().toUpperCase();
-    const epss = Number(f?.epss), percentil = Number(f?.percentile);
+    if (f?.epss == null || f.epss === "") continue; // Number("") es 0: sin puntaje no es puntaje cero.
+    const epss = Number(f.epss), percentil = Number(f?.percentile);
     if (!CVE_RE.test(cve) || !Number.isFinite(epss) || epss < 0 || epss > 1) continue;
     out.push({ cve, epss, percentil: Number.isFinite(percentil) && percentil >= 0 && percentil <= 1 ? percentil : null, fecha: fechaValida(f.date) });
   }

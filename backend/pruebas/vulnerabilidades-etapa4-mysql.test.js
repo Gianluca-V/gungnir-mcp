@@ -55,7 +55,7 @@ describe("etapa 4 contra la base", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" },
       await require("../vulnerabilidades").crearTablasCompletas({ qRows, qRun });
     }
     await qRun("INSERT INTO clients (id, name) VALUES (?,?), (?,?)", [CA, "Cliente A", CB, "Cliente B"]);
-    await qRun("INSERT INTO engagements (id, client_id, title, status, tenant_id) VALUES (?,?,?,?,?)", [EA, CA, "Pentest A", "in_progress", "org-A"]);
+    await qRun("INSERT INTO engagements (id, client_id, title, status) VALUES (?,?,?,?)", [EA, CA, "Pentest A", "in_progress"]);
     deps = { qRow, qRows, qRun, transaccion };
   });
 

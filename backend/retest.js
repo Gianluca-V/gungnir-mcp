@@ -16,7 +16,7 @@ async function aplicar({ qRun }, f, { result, retest_severity, notes }, userId) 
 
 /** Lo que sigue a guardarla: la auditoría y el historial de la vulnerabilidad continua (no la cierra). */
 async function dejarConstancia({ qRows, qRun, auditLog }, f, result, { id, username, ip }) {
-  auditLog(id, username, "finding_retest", "engagements", f.engagement_id, `${String(f.title).slice(0,60)} → ${result}`, ip);
+  await auditLog(id, username, "finding_retest", "engagements", f.engagement_id, `${String(f.title).slice(0,60)} → ${result}`, ip);
   await require("./vulnerabilidades-engagement").registrarRetest({ qRows, qRun }, f.id, result, username);
 }
 

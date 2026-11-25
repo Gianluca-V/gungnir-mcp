@@ -280,3 +280,20 @@ describe("límite por dirección", () => {
     } finally { srv.closeAllConnections(); srv.close(); }
   });
 });
+
+describe("reintento ante un bloqueo mutuo", () => {
+  const { reintentando } = require("../agentes/comun");
+  const mutuo = () => Object.assign(new Error("x"), { code: "ER_LOCK_DEADLOCK" });
+  test("🔴 repite la transacción entera y limpia lo que quedó afuera", async () => {
+    let n = 0, limpiezas = 0;
+    assert.equal(await reintentando(async () => { if (++n < 3) throw mutuo(); return "ok"; }, async () => { limpiezas++; }), "ok");
+    assert.deepEqual([n, limpiezas], [3, 2]);
+  });
+  test("🔴 no repite otros errores ni insiste para siempre", async () => {
+    let n = 0;
+    await assert.rejects(reintentando(async () => { n++; throw new Error("otro"); }), /otro/);
+    assert.equal(n, 1);
+    await assert.rejects(reintentando(async () => { n++; throw mutuo(); }));
+    assert.equal(n, 5);
+  });
+});
