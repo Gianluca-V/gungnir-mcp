@@ -9,6 +9,7 @@ import { SkipToMain } from '@/components/skip-to-main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Separator } from '@/components/ui/separator'
+import { AvisoAgentes } from '@/features/agentes/aviso'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
@@ -34,6 +35,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
               <SidebarTrigger variant='outline' className='shrink-0' />
               <Separator orientation='vertical' className='h-5' />
               <div className='flex-1' />
+              <AvisoAgentes />
               <ThemeSwitch />
               <ProfileDropdown />
             </header>

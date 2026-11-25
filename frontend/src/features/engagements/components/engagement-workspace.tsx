@@ -41,6 +41,7 @@ interface OperationLog {
   tool: string
   command: string
   notes: string
+  fuera_de_alcance?: number
 }
 interface Finding {
   id: string
@@ -446,6 +447,7 @@ export function EngagementWorkspace({ engagementId }: { engagementId: string }) 
                       <span className='font-mono'>{new Date(log.logged_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>
                       {log.tool && <Badge variant='outline' className='text-xs px-1 py-0 h-4'>{log.tool}</Badge>}
                       {log.target && <span className='font-mono'>{log.target}</span>}
+                      {!!log.fuera_de_alcance && <Badge variant='destructive' className='text-xs px-1 py-0 h-4'>{t('agentes.violations.log_badge')}</Badge>}
                     </div>
                     {log.command && <p className='font-mono text-xs text-foreground/80 break-all'>{log.command}</p>}
                     {log.notes && <p className='text-xs text-muted-foreground mt-1'>{log.notes}</p>}

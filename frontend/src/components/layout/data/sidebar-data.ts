@@ -16,6 +16,7 @@ import {
   GraduationCap,
   ShieldAlert,
   HardDrive,
+  Bot,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -47,6 +48,7 @@ export const sidebarData: SidebarData = {
       frente: 1,
       items: [
         { title: 'nav.api_keys', url: '/integraciones/api-keys', icon: Key },
+        { title: 'nav.agents',   url: '/integraciones/agentes',  icon: Bot },
         { title: 'nav.recon',    url: '/recon',                   icon: Globe },
       ],
     },

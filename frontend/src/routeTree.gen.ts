@@ -34,6 +34,7 @@ import { Route as AuthenticatedEngagementsIndexRouteImport } from './routes/_aut
 import { Route as AuthenticatedEngagementsEngagementIdRouteImport } from './routes/_authenticated/engagements/$engagementId'
 import { Route as AuthenticatedEngagementsNuevoRouteImport } from './routes/_authenticated/engagements/nuevo'
 import { Route as AuthenticatedIntegracionesIndexRouteImport } from './routes/_authenticated/integraciones/index'
+import { Route as AuthenticatedIntegracionesAgentesRouteImport } from './routes/_authenticated/integraciones/agentes'
 import { Route as AuthenticatedIntegracionesApiKeysRouteImport } from './routes/_authenticated/integraciones/api-keys'
 import { Route as AuthenticatedMiCuentaIndexRouteImport } from './routes/_authenticated/mi-cuenta/index'
 import { Route as AuthenticatedNotasIndexRouteImport } from './routes/_authenticated/notas/index'
@@ -187,6 +188,12 @@ const AuthenticatedIntegracionesIndexRoute =
     path: '/integraciones/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedIntegracionesAgentesRoute =
+  AuthenticatedIntegracionesAgentesRouteImport.update({
+    id: '/integraciones/agentes',
+    path: '/integraciones/agentes',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedIntegracionesApiKeysRoute =
   AuthenticatedIntegracionesApiKeysRouteImport.update({
     id: '/integraciones/api-keys',
@@ -293,6 +300,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/threat-intel': typeof AuthenticatedDashboardThreatIntelRoute
   '/engagements/$engagementId': typeof AuthenticatedEngagementsEngagementIdRoute
   '/engagements/nuevo': typeof AuthenticatedEngagementsNuevoRoute
+  '/integraciones/agentes': typeof AuthenticatedIntegracionesAgentesRoute
   '/integraciones/api-keys': typeof AuthenticatedIntegracionesApiKeysRoute
   '/activos/': typeof AuthenticatedActivosIndexRoute
   '/auditoria/': typeof AuthenticatedAuditoriaIndexRoute
@@ -334,6 +342,7 @@ export interface FileRoutesByTo {
   '/dashboard/threat-intel': typeof AuthenticatedDashboardThreatIntelRoute
   '/engagements/$engagementId': typeof AuthenticatedEngagementsEngagementIdRoute
   '/engagements/nuevo': typeof AuthenticatedEngagementsNuevoRoute
+  '/integraciones/agentes': typeof AuthenticatedIntegracionesAgentesRoute
   '/integraciones/api-keys': typeof AuthenticatedIntegracionesApiKeysRoute
   '/activos': typeof AuthenticatedActivosIndexRoute
   '/auditoria': typeof AuthenticatedAuditoriaIndexRoute
@@ -377,6 +386,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/threat-intel': typeof AuthenticatedDashboardThreatIntelRoute
   '/_authenticated/engagements/$engagementId': typeof AuthenticatedEngagementsEngagementIdRoute
   '/_authenticated/engagements/nuevo': typeof AuthenticatedEngagementsNuevoRoute
+  '/_authenticated/integraciones/agentes': typeof AuthenticatedIntegracionesAgentesRoute
   '/_authenticated/integraciones/api-keys': typeof AuthenticatedIntegracionesApiKeysRoute
   '/_authenticated/activos/': typeof AuthenticatedActivosIndexRoute
   '/_authenticated/auditoria/': typeof AuthenticatedAuditoriaIndexRoute
@@ -420,6 +430,7 @@ export interface FileRouteTypes {
     | '/dashboard/threat-intel'
     | '/engagements/$engagementId'
     | '/engagements/nuevo'
+    | '/integraciones/agentes'
     | '/integraciones/api-keys'
     | '/activos/'
     | '/auditoria/'
@@ -461,6 +472,7 @@ export interface FileRouteTypes {
     | '/dashboard/threat-intel'
     | '/engagements/$engagementId'
     | '/engagements/nuevo'
+    | '/integraciones/agentes'
     | '/integraciones/api-keys'
     | '/activos'
     | '/auditoria'
@@ -503,6 +515,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/threat-intel'
     | '/_authenticated/engagements/$engagementId'
     | '/_authenticated/engagements/nuevo'
+    | '/_authenticated/integraciones/agentes'
     | '/_authenticated/integraciones/api-keys'
     | '/_authenticated/activos/'
     | '/_authenticated/auditoria/'
@@ -719,6 +732,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIntegracionesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/integraciones/agentes': {
+      id: '/_authenticated/integraciones/agentes'
+      path: '/integraciones/agentes'
+      fullPath: '/integraciones/agentes'
+      preLoaderRoute: typeof AuthenticatedIntegracionesAgentesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/integraciones/api-keys': {
       id: '/_authenticated/integraciones/api-keys'
       path: '/integraciones/api-keys'
@@ -834,6 +854,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardThreatIntelRoute: typeof AuthenticatedDashboardThreatIntelRoute
   AuthenticatedEngagementsEngagementIdRoute: typeof AuthenticatedEngagementsEngagementIdRoute
   AuthenticatedEngagementsNuevoRoute: typeof AuthenticatedEngagementsNuevoRoute
+  AuthenticatedIntegracionesAgentesRoute: typeof AuthenticatedIntegracionesAgentesRoute
   AuthenticatedIntegracionesApiKeysRoute: typeof AuthenticatedIntegracionesApiKeysRoute
   AuthenticatedActivosIndexRoute: typeof AuthenticatedActivosIndexRoute
   AuthenticatedAuditoriaIndexRoute: typeof AuthenticatedAuditoriaIndexRoute
@@ -868,6 +889,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEngagementsEngagementIdRoute:
     AuthenticatedEngagementsEngagementIdRoute,
   AuthenticatedEngagementsNuevoRoute: AuthenticatedEngagementsNuevoRoute,
+  AuthenticatedIntegracionesAgentesRoute:
+    AuthenticatedIntegracionesAgentesRoute,
   AuthenticatedIntegracionesApiKeysRoute:
     AuthenticatedIntegracionesApiKeysRoute,
   AuthenticatedActivosIndexRoute: AuthenticatedActivosIndexRoute,
