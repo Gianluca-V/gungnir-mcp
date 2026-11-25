@@ -2217,6 +2217,7 @@
         "evidencia": "Attach evidence",
         "evidencia_borrar": "Delete evidence",
         "importar": "Import scan",
+        "mapa": "Record on the map",
         "metodologia": "Mark methodology",
         "tecnica": "Record technique",
         "otra": "Unknown request"
@@ -2226,6 +2227,7 @@
       "open": "Edit",
       "title": "Edit and approve",
       "desc_crear": "What the agent proposed. Correct whatever is needed: approving saves it as a finding.",
+      "desc_mapa": "Hosts, ports and pivots the agent proposes. Remove the ones you do not want on the map. What a person entered is not overwritten.",
       "desc_retest": "What the agent says it verified, next to what there is today. Approving closes the finding, reopens it or leaves it in remediation.",
       "desc_actualizar": "What the agent proposed next to the current value. Remove the fields you do not want to apply.",
       "changed": "The finding changed after the proposal. Compare before approving.",
@@ -2318,6 +2320,13 @@
         "post_exploitation": "Post-exploitation",
         "reporting": "Reporting"
       }
+    },
+    "map": {
+      "title_one": "{{count}} host for the Attack Map",
+      "title_other": "{{count}} hosts for the Attack Map",
+      "owned": "Compromised",
+      "from": "From {{host}}",
+      "kept": "{{kept}} of {{total}} go to the map"
     },
     "pause": {
       "all": "Pause agents",
@@ -2414,6 +2423,7 @@
       "kind_crear": "New",
       "kind_actualizar": "Change",
       "kind_retest": "Retest",
+      "kind_mapa": "Attack Map",
       "by": "Key {{key}}",
       "approve": "Approve",
       "reject": "Reject",
@@ -2443,6 +2453,7 @@
       "type": {
         "log": "Action",
         "hallazgo": "Rejected finding",
+        "mapa": "Attack Map",
         "importacion": "Imported scan"
       },
       "log_badge": "Out of scope"

@@ -2217,6 +2217,7 @@
         "evidencia": "Adjuntar evidencia",
         "evidencia_borrar": "Borrar evidencia",
         "importar": "Importar escaneo",
+        "mapa": "Registrar en el mapa",
         "metodologia": "Marcar metodología",
         "tecnica": "Registrar técnica",
         "otra": "Pedido desconocido"
@@ -2226,6 +2227,7 @@
       "open": "Editar",
       "title": "Editar y aprobar",
       "desc_crear": "Lo que propuso el agente. Corregí lo que haga falta: se guarda como hallazgo al aprobar.",
+      "desc_mapa": "Equipos, puertos y pivotes que propone el agente. Sacá los que no quieras en el mapa. Lo que ya cargó una persona no se pisa.",
       "desc_retest": "Lo que el agente dice haber comprobado, junto a lo que hay hoy. Al aprobar, el hallazgo se cierra, se reabre o queda en remediación.",
       "desc_actualizar": "Lo que propuso el agente junto al valor actual. Sacá los campos que no quieras aplicar.",
       "changed": "El hallazgo se modificó después de la propuesta. Compará antes de aprobar.",
@@ -2318,6 +2320,13 @@
         "post_exploitation": "Post-explotación",
         "reporting": "Reporte"
       }
+    },
+    "map": {
+      "title_one": "{{count}} equipo para el Attack Map",
+      "title_other": "{{count}} equipos para el Attack Map",
+      "owned": "Comprometido",
+      "from": "Desde {{host}}",
+      "kept": "{{kept}} de {{total}} van al mapa"
     },
     "pause": {
       "all": "Pausar agentes",
@@ -2414,6 +2423,7 @@
       "kind_crear": "Nuevo",
       "kind_actualizar": "Cambio",
       "kind_retest": "Retest",
+      "kind_mapa": "Attack Map",
       "by": "Key {{key}}",
       "approve": "Aprobar",
       "reject": "Rechazar",
@@ -2443,6 +2453,7 @@
       "type": {
         "log": "Acción",
         "hallazgo": "Hallazgo rechazado",
+        "mapa": "Attack Map",
         "importacion": "Escaneo importado"
       },
       "log_badge": "Fuera de alcance"

@@ -29,7 +29,8 @@ Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resol
     `Enumerá servicios y vulnerabilidades de los objetivos en alcance.
 1. Elegí la intensidad según las reglas del engagement y guardá la salida en un archivo (por ejemplo, nmap -oX).
 2. importar_escaneo con el archivo. No pegues la salida en la conversación.
-3. Revisá el resumen: lo de severidad alta o crítica se verifica a mano antes de darlo por cierto.`),
+3. registrar_mapa con los equipos y puertos abiertos que importen.
+4. Revisá el resumen: lo de severidad alta o crítica se verifica a mano antes de darlo por cierto.`),
   fase('explotacion', 'Explotación', 'Confirmar vulnerabilidades con el menor impacto posible',
     `Confirmá las vulnerabilidades candidatas con la prueba menos invasiva que alcance.
 1. listar_registros (tipo "hallazgos") por severidad.
@@ -41,7 +42,7 @@ Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resol
 1. Mové solo hacia objetivos que verificar_alcance dé por dentro.
 2. No extraigas datos reales: alcanza con demostrar el acceso.
 3. Sin persistencia. Registrá todo cambio que hagas en un equipo y cómo se revierte.
-4. registrar_tecnica con su identificador MITRE ATT&CK.`),
+4. registrar_mapa con lo comprometido y desde qué equipo se llegó. registrar_tecnica con su identificador MITRE ATT&CK.`),
   fase('reporte', 'Reporte', 'Completar y ordenar los hallazgos',
     `Dejá los hallazgos listos para el informe.
 1. listar_registros (tipo "hallazgos") y ver_hallazgo en cada uno.

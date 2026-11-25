@@ -13,8 +13,10 @@ const { v4: uuidv4 } = require("uuid");
 const N = require("./niveles");
 const H = require("./hallazgos");
 const importacion = require("./importacion");
+const mapa = require("./mapa");
 const retest = require("./retest");
-const { evaluar } = require("./alcance");
+const { comoObjeto } = require("./aprobacion");
+const { evaluar, evaluador } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
 
@@ -285,6 +287,32 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
       // Sin avisos por hallazgo, igual que la importación del panel: un escaneo mandaría cientos.
       despues: () => anotar(req, "importar", "findings", req.engagement.id, `${formato}: ${creados.length} de ${leidos.length}`),
     };
+  }));
+
+  // ── Attack Map ──────────────────────────────────────────────────────────────
+  router.post("/engagements/:id/mapa", con("propuesta"), escribir(async (req, tx) => {
+    const datos = mapa.validar(req.body);
+    await enFila(tx, req.engagement.id);
+    const evaluar = evaluador(await alcanceDe(tx, req.engagement.id));
+    const fuera = datos.equipos.flatMap(mapa.objetivosDe).map((objetivo) => ({ tipo: "mapa", objetivo, motivo: evaluar(objetivo) }))
+      .filter((x) => !x.motivo.dentro).map((x) => ({ ...x, motivo: x.motivo.motivo }));
+    if (fuera.length) {
+      const e = new ErrorHttp(422, `No se guardó nada: hay ${fuera.length} objetivo(s) fuera de alcance. ${fuera.slice(0, 10).map((x) => req.ocultar.texto(x.motivo, true)).join(" ")}`);
+      e.violaciones = fuera.slice(0, TOPE_VIOLACIONES);
+      throw e;
+    }
+    const cuantos = datos.equipos.length;
+    if (!N.alcanza(req.engagement.nivel, "escritura")) {
+      const pendientes = await tx.qRows("SELECT id, datos FROM agente_propuestas WHERE engagement_id=? AND key_id=? AND accion='mapa' AND estado='pendiente'", [req.engagement.id, req.agente.keyId]);
+      const igual = pendientes.find((p) => JSON.stringify(mapa.validar(comoObjeto(p.datos))) === JSON.stringify(datos));
+      if (igual) throw new ErrorHttp(409, "Ya propusiste eso y está pendiente de aprobación.", { existente: { tipo: "propuesta", id: igual.id } });
+      if (pendientes.length >= mapa.MAX_PENDIENTES) throw new ErrorHttp(409, `Ya hay ${pendientes.length} propuestas de mapa pendientes: esperá a que se decidan.`);
+      const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "mapa", datos });
+      return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "Queda a la espera de que una persona lo apruebe en el panel." },
+        despues: () => anotar(req, "propuesta", "agente_propuestas", id, `mapa: ${cuantos} equipo(s)`) };
+    }
+    const r = await mapa.aplicar(tx, req.engagement.id, datos);
+    return { codigo: 200, cuerpo: { ...r, conservados: req.ocultar.objeto(r.conservados) }, despues: () => anotar(req, "mapa", "engagements", req.engagement.id, `${cuantos} equipo(s), ${r.puertos_nuevos} puerto(s) nuevos`) };
   }));
 
   // ── Metodología y técnicas ──────────────────────────────────────────────────

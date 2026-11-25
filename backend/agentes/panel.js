@@ -242,7 +242,7 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
         [findingId, campos.length ? JSON.stringify(datos) : null, campos.length ? JSON.stringify(campos) : null, req.user.id, id]);
       return { p, findingId, campos, despues };
     });
-    await anotar(req, "agente_propuesta_aprobar", "findings", r.findingId,
+    await anotar(req, "agente_propuesta_aprobar", r.findingId ? "findings" : "engagements", r.findingId ?? r.p.engagement_id,
       `Propuesta de la key "${r.p.key_nombre}"${r.campos.length ? `. Editada: ${r.campos.join(", ")}` : ""}`);
     if (r.despues) await r.despues();
     if (r.p.accion === "crear") notificar(r.findingId, r.p.engagement_id);

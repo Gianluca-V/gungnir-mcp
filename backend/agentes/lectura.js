@@ -8,6 +8,7 @@ const path = require("path");
 const N = require("./niveles");
 const H = require("./hallazgos");
 const { RESULTADOS } = require("../retest");
+const { nombresDe: nombresDeEquipo } = require("./mapa");
 const { evaluador } = require("./alcance");
 const { CAMPOS_CLIENTE, nombresDe } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero, recortar } = require("./comun");
@@ -17,6 +18,7 @@ const ARSENAL = require(path.join(__dirname, "..", "data", "arsenal.json"));
 const LARGO_CAMPO = 4000;
 const LARGO_COMPLETO = 40000;
 const LARGO_LISTA = 600;
+const PUERTOS_POR_EQUIPO = 200;
 const ESTADOS_METODOLOGIA = ["pending", "tested", "not_applicable"];
 
 /** Lista guardada como JSON. Lo que no se puede leer cuenta como vacío: una fila mala no rompe el listado. */
@@ -134,6 +136,29 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
       params: [req.engagement.id, req.agente.keyId, ...(estado ? [estado] : [])],
       preparar: (p) => ({ ...p, campos_editados: p.campos_editados ? comoLista(p.campos_editados) : null }),
     });
+  }));
+
+  // ── Attack Map ──────────────────────────────────────────────────────────────
+  router.get("/engagements/:id/mapa", con("lectura"), ruta(async (req, res) => {
+    const { limite, desde } = paginar(req.query);
+    const filas = await qRows(
+      `SELECT t.id, t.ip_address, t.fqdn, t.url_address, t.os_type, t.owned, t.notes, COALESCE(o.ip_address, o.fqdn, o.url_address) AS desde
+       FROM engagement_targets t LEFT JOIN engagement_targets o ON o.id=t.jumped_from_id AND o.engagement_id=t.engagement_id
+       WHERE t.engagement_id=? ORDER BY t.created_at, t.id LIMIT ${limite + 1} OFFSET ${desde}`, [req.engagement.id]);
+    const hayMas = filas.length > limite, pagina = filas.slice(0, limite);
+    const puertos = pagina.length ? await qRows(
+      `SELECT target_id, port_number AS puerto, protocol AS protocolo, service_name AS servicio, product AS producto, version FROM target_ports
+       WHERE engagement_id=? AND state='open' AND target_id IN (${pagina.map(() => "?").join(",")}) ORDER BY port_number, protocol`, [req.engagement.id, ...pagina.map((t) => t.id)]) : [];
+    const porEquipo = new Map();
+    for (const { target_id, ...p } of puertos) {
+      if (!porEquipo.has(target_id)) porEquipo.set(target_id, []);
+      porEquipo.get(target_id).push(p);
+    }
+    entregar(req, res, pagina.map((t) => {
+      const suyos = porEquipo.get(t.id) || [];
+      return { id: t.id, objetivos: nombresDeEquipo(t), os_type: t.os_type, comprometido: Boolean(t.owned), desde: t.desde, notas: t.notes,
+        puertos: suyos.slice(0, PUERTOS_POR_EQUIPO), ...(suyos.length > PUERTOS_POR_EQUIPO ? { puertos_total: suyos.length } : {}) };
+    }), { max: LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null });
   }));
 
   // ── Logs, evidencias y técnicas ─────────────────────────────────────────────

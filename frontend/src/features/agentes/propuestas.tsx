@@ -24,6 +24,7 @@ import {
   type Propuesta,
 } from './comun'
 import { DialogoPropuesta } from './dialogo-propuesta'
+import { Equipo, equiposDe } from './mapa'
 
 interface Aprobacion {
   p: Propuesta
@@ -184,7 +185,11 @@ export function Propuestas() {
         )}
         <ul className='divide-y divide-border rounded-lg border border-border'>
           {filas.map((p) => {
-            const titulo = texto(p.datos.title) || p.hallazgo_actual || ''
+            const equipos = equiposDe(p.datos)
+            const titulo =
+              p.accion === 'mapa'
+                ? t('agentes.map.title', { count: equipos.length })
+                : texto(p.datos.title) || p.hallazgo_actual || ''
             const sev = p.datos.severity as Severidad | undefined
             return (
               <li key={p.id} className='flex gap-3 p-4'>
@@ -243,7 +248,7 @@ export function Propuestas() {
                       )}
                     </div>
                     {decide && (
-                      <div className='flex gap-2'>
+                      <div className='flex flex-wrap gap-2'>
                         <Button
                           variant='outline'
                           size='sm'
@@ -276,6 +281,15 @@ export function Propuestas() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     {/* Texto plano a propósito: lo escribió un agente. */}
+                    {p.accion === 'mapa' && (
+                      <ul className='mt-3 space-y-3'>
+                        {equipos.map((e) => (
+                          <li key={e.objetivo}>
+                            <Equipo e={e} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <dl className='mt-3 space-y-3'>
                       {Object.entries(p.datos)
                         .filter(
@@ -286,6 +300,7 @@ export function Propuestas() {
                               'severity',
                               'resultado',
                               'objetivo',
+                              'equipos',
                             ].includes(k)
                         )
                         .map(([k, v]) => (
@@ -338,7 +353,15 @@ export function Propuestas() {
         open={!!aRechazar}
         onOpenChange={(v) => !v && cerrarRechazo()}
         title={t('agentes.proposals.reject_title')}
-        desc={texto(aRechazar?.datos.title) || aRechazar?.hallazgo_actual || ''}
+        desc={
+          texto(aRechazar?.datos.title) ||
+          aRechazar?.hallazgo_actual ||
+          (aRechazar &&
+            equiposDe(aRechazar.datos)
+              .map((e) => e.objetivo)
+              .join(', ')) ||
+          ''
+        }
         confirmText={t('agentes.proposals.reject')}
         destructive
         isLoading={rechazar.isPending}

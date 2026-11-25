@@ -8,6 +8,7 @@
  *   aplicar(tx, p, datos, ctx)  lo guarda y devuelve { findingId, despues }.
  */
 const H = require("./hallazgos");
+const mapa = require("./mapa");
 const retest = require("./retest");
 const R = require("../retest");
 const { ErrorHttp } = require("./comun");
@@ -65,6 +66,16 @@ const TIPOS = {
       const f = await tomarHallazgo(tx, p, forzar);
       await R.aplicar(tx, f, { result: datos.resultado, retest_severity: datos.retest_severity, notes: datos.notas }, userId);
       return { findingId: f.id, despues: () => R.dejarConstancia(deps, f, datos.resultado, persona) };
+    },
+  },
+  mapa: {
+    validar: (d) => mapa.validar(d),
+    objetivos: (d) => d.equipos.flatMap(mapa.objetivosDe),
+    actual: async () => null,
+    async aplicar(tx, p, datos) {
+      await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
+      await mapa.aplicar(tx, p.engagement_id, datos);
+      return { findingId: null };
     },
   },
 };

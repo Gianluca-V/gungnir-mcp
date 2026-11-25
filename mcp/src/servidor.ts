@@ -18,6 +18,7 @@ Si responde que está en pausa, detené todo, también lo que corra en tu termin
 
 const FASES = ['planning', 'recon', 'scanning', 'exploitation', 'post_exploitation', 'reporting'] as const
 const SEVERIDADES = ['critical', 'high', 'medium', 'low', 'info'] as const
+const SISTEMAS = ['windows', 'windowsserver', 'linux', 'ubuntu', 'debian', 'kali', 'parrot', 'arch', 'fedora', 'redhat', 'macos', 'router', 'server', 'firewall', 'switch', 'printer', 'nas', 'iot', 'camera', 'android', 'ios', 'freebsd', 'other'] as const
 const FRAMEWORKS = ['owasp_wstg', 'ptes'] as const
 
 const fase = z.enum(FASES)
@@ -147,6 +148,9 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, framework: z.enum(FRAMEWORKS).optional().describe('Por defecto, owasp_wstg'), estado: z.enum(['pending', 'tested', 'not_applicable']).optional(), ...pagina }, LEE,
     async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/metodologia`, { consulta }))
 
+  herramienta('ver_mapa', 'Ver mapa', 'Attack Map: equipos con sus puertos, sistema, si están comprometidos y desde cuál se llegó.', { engagement, ...pagina }, LEE,
+    async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/mapa`, { consulta }))
+
   herramienta('buscar_arsenal', 'Buscar en el arsenal', 'Comandos de referencia por texto, herramienta o fase. No los ejecuta.',
     { q: z.string().max(200).optional(), herramienta: z.string().max(100).optional(), fase: z.enum(['recon', 'scanning', 'exploitation', 'post_exploitation', 'general']).optional(), ...pagina, limite: pagina.limite.describe('Por defecto, 10') }, LEE,
     async (a) => cliente.pedir('GET', '/arsenal', { consulta: { limite: 10, ...a } }))
@@ -177,6 +181,21 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
   herramienta('modificar_hallazgo', 'Modificar hallazgo', 'Cambia solo los campos enviados. No copies marcas [OCULTO:...] ni [RECORTADO:...].',
     { engagement, id: z.string().uuid(), title: z.string().min(1).max(500).optional(), affected_asset: z.string().min(1).max(500).optional(), ...camposHallazgo }, PISA,
     async ({ engagement: e, id, ...cuerpo }) => cliente.pedir('PUT', `${await base(e)}/hallazgos/${id}`, { cuerpo }))
+
+  herramienta('registrar_mapa', 'Registrar en el mapa', 'Suma equipos, puertos y pivotes al Attack Map, o los propone según el nivel. No pisa lo cargado por una persona: lo que conservó vuelve en "conservados".',
+    {
+      engagement,
+      equipos: z.array(z.strictObject({
+        objetivo: z.string().min(1).max(500).describe('Una IP, un nombre o una URL, sin puerto'),
+        os_type: z.enum(SISTEMAS).optional(), notas: z.string().max(5000).optional(),
+        comprometido: z.literal(true).optional(), desde: z.string().max(500).optional().describe('Equipo del mapa desde el que se llegó'),
+        puertos: z.array(z.strictObject({
+          puerto: z.number().int().min(1).max(65535), protocolo: z.enum(['tcp', 'udp', 'sctp']).optional(),
+          servicio: z.string().max(100).optional(), producto: z.string().max(255).optional(), version: z.string().max(255).optional(),
+        })).optional(),
+      })).min(1).max(50),
+    }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/mapa`, { cuerpo }))
 
   herramienta('proponer_retest', 'Proponer retest', 'Propone el resultado de reprobar un hallazgo. Siempre lo aprueba una persona. Adjuntá antes la evidencia.',
     {

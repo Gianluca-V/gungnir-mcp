@@ -153,7 +153,7 @@ describe('servidor MCP', () => {
   test('ofrece las herramientas, marca las que borran o pisan y no ejecuta nada por defecto', async () => {
     const { c } = await armar(() => ({}))
     const t = (await c.listTools()).tools
-    assert.equal(t.length, 19)
+    assert.equal(t.length, 21)
     assert.ok(!t.some((x) => x.name === 'ejecutar_herramienta'))
     assert.deepEqual(t.filter((x) => x.annotations?.destructiveHint).map((x) => x.name).sort(), ['borrar', 'marcar_metodologia', 'modificar_hallazgo'])
     for (const x of t) assert.ok(x.description && x.annotations?.readOnlyHint !== undefined, x.name)
@@ -232,7 +232,7 @@ describe('servidor MCP', () => {
       ['ver_hallazgo', { id: E2 }, `GET /hallazgos/${E2}`], ['ver_metodologia', {}, 'GET /metodologia'], ['registrar_log', { fase: 'recon', notas: 'x' }, 'POST /logs'],
       ['crear_hallazgo', { title: 'a', affected_asset: 'b' }, 'POST /hallazgos'], ['modificar_hallazgo', { id: E2, title: 'x' }, `PUT /hallazgos/${E2}`],
       ['marcar_metodologia', { item: 'WSTG-INFO-01', estado: 'tested' }, 'PUT /metodologia/WSTG-INFO-01'], ['registrar_tecnica', { nombre: 'x' }, 'POST /tecnicas'],
-      ['borrar', { tipo: 'logs', id: E2 }, `DELETE /logs/${E2}`], ['proponer_retest', { id: E2, resultado: 'passed', notas: 'x' }, `POST /hallazgos/${E2}/retest`],
+      ['borrar', { tipo: 'logs', id: E2 }, `DELETE /logs/${E2}`], ['ver_mapa', {}, 'GET /mapa'], ['registrar_mapa', { equipos: [{ objetivo: 'a', puertos: [{ puerto: 22 }] }] }, 'POST /mapa'], ['proponer_retest', { id: E2, resultado: 'passed', notas: 'x' }, `POST /hallazgos/${E2}/retest`],
     ]
     for (const [n, a, e] of casos) {
       const r = await x.llamar(n, a as Record<string, unknown>); assert.ok(!r.error, r.texto)

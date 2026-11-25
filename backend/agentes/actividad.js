@@ -23,6 +23,7 @@ const ACCIONES = [
   ["POST", /^\/engagements\/[^/]+\/evidencias\/?$/i, "evidencia"],
   ["DELETE", /^\/engagements\/[^/]+\/evidencias\//i, "evidencia_borrar"],
   ["POST", /^\/engagements\/[^/]+\/importar\/?$/i, "importar"],
+  ["POST", /^\/engagements\/[^/]+\/mapa\/?$/i, "mapa"],
   ["PUT", /^\/engagements\/[^/]+\/metodologia\//i, "metodologia"],
   ["POST", /^\/engagements\/[^/]+\/tecnicas\/?$/i, "tecnica"],
 ];
@@ -37,6 +38,7 @@ const corto = (v, n = 500) => (typeof v === "string" && v.trim() ? v.trim().slic
 function objetivoDe(req, ruta) {
   const b = req.body && typeof req.body === "object" ? req.body : {};
   const partes = [corto(b.title, 300), corto(b.affected_asset), corto(b.objetivo), corto(b.nombre, 200), req.file && corto(Buffer.from(req.file.originalname, "latin1").toString("utf8"), 255)].filter(Boolean);
+  if (Array.isArray(b.equipos)) partes.push(b.equipos.slice(0, 20).map((e) => corto(e?.objetivo, 100)).filter(Boolean).join(", "));
   if (!partes.length) partes.push(corto(/\/(?:metodologia|hallazgos|logs|evidencias)\/([\w-]{1,80})/.exec(ruta)?.[1]));
   return corto(partes.filter(Boolean).join(" · "));
 }

@@ -33,6 +33,7 @@ import {
   type Campo,
 } from './campos'
 import { Estado, type DetallePropuesta, type Propuesta } from './comun'
+import { FormularioMapa } from './mapa'
 
 interface Props {
   propuesta: Propuesta
@@ -73,7 +74,12 @@ export function DialogoPropuesta(props: Props) {
           vacio={false}
           textoVacio={null}
         >
-          {consulta.data && <Formulario {...props} detalle={consulta.data} />}
+          {consulta.data &&
+            (propuesta.accion === 'mapa' ? (
+              <FormularioMapa {...props} detalle={consulta.data} />
+            ) : (
+              <Formulario {...props} detalle={consulta.data} />
+            ))}
         </Estado>
       </DialogContent>
     </Dialog>

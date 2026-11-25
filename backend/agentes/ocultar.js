@@ -13,7 +13,7 @@
 const crypto = require("crypto");
 
 const MARCA = /\[OCULTO:[a-z]+:[0-9a-f]{6}\]/;
-const CLAVES_OBJETIVO = new Set(["value", "target", "affected_asset", "objetivo", "objetivos", "original_name"]);
+const CLAVES_OBJETIVO = new Set(["value", "target", "affected_asset", "objetivo", "objetivos", "desde", "original_name"]);
 const TOPE = 200000;
 
 // Una palabra que anuncia una clave, sola o dentro de un nombre (DB_PASSWORD, userPassword), y después

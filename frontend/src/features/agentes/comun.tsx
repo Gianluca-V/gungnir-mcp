@@ -46,10 +46,25 @@ export interface Propuesta {
   id: string
   engagement_title: string
   key_nombre: string
-  accion: 'crear' | 'actualizar' | 'retest'
+  accion: 'crear' | 'actualizar' | 'retest' | 'mapa'
   hallazgo_actual: string | null
   datos: Record<string, unknown>
   creada_en: string
+}
+
+export interface EquipoMapa {
+  objetivo: string
+  os_type?: string
+  notas?: string
+  comprometido?: boolean
+  desde?: string
+  puertos?: {
+    puerto: number
+    protocolo: string
+    servicio?: string
+    producto?: string
+    version?: string
+  }[]
 }
 
 export interface DetallePropuesta extends Propuesta {
@@ -63,7 +78,7 @@ export interface Violacion {
   id: string
   engagement_title: string
   key_nombre: string
-  tipo: 'log' | 'hallazgo' | 'importacion'
+  tipo: 'log' | 'hallazgo' | 'importacion' | 'mapa'
   objetivo: string
   motivo: string
   command: string | null

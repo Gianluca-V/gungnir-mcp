@@ -98,6 +98,8 @@ async function crearTablas({ qRun }) {
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 
+  await qRun("ALTER TABLE agente_violaciones MODIFY tipo ENUM('log','hallazgo','importacion','mapa') NOT NULL");
+
   await qRun(`CREATE TABLE IF NOT EXISTS agente_actividad (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     key_id VARCHAR(36) NOT NULL,

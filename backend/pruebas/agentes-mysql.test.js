@@ -860,6 +860,196 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("Attack Map", () => {
+    const mandar = (key, equipos, e = E.a, extra) => ag(key, "POST", `/engagements/${e}/mapa`, { equipos }, extra);
+    const ver = async (key = "lectura", q = "?limite=100") => (await ag(key, "GET", `/engagements/${E.a}/mapa${q}`)).json;
+    const uno = async (o) => (await ver()).datos.find((x) => x.objetivos.includes(o));
+    const equipos = () => contar("engagement_targets", "engagement_id=?", [E.a]);
+    const limpio = () => sql("DELETE FROM engagement_targets WHERE engagement_id=?", [E.a]);
+    const aprobar = (id, body) => panel("auditor", "POST", `/propuestas/${id}/aprobar`, body);
+    const agregar = async (c) => { const id = uid(); await sql("INSERT INTO engagement_targets (id,engagement_id,ip_address,fqdn,url_address,os_type,notes,owned,jumped_from_id) VALUES (?,?,?,?,?,?,?,?,?)", [id, E.a, c.ip ?? null, c.fqdn ?? null, c.url ?? null, c.os ?? "other", c.notas ?? null, c.owned ? 1 : 0, c.desde ?? null]); return id; };
+    const COMPLETO = { objetivo: "10.10.1.1", os_type: "linux", notas: "DMZ", puertos: [{ puerto: 22, servicio: "ssh", producto: "OpenSSH", version: "9.6" }, { puerto: 53, protocolo: "udp" }] };
+    before(limpio); after(limpio);
+    test("🔴 en Escritura guarda, en Propuesta espera aprobación y en Lectura no entra", async () => {
+      await limpio();
+      const p = await mandar("propuesta", [COMPLETO]);
+      assert.equal(p.status, 202, p.texto); assert.equal(await equipos(), 0);
+      assert.equal((await mandar("lectura", [COMPLETO])).status, 403);
+      const r = await mandar("escritura", [COMPLETO, { objetivo: "app.ejemplo.com", desde: "10.10.1.1", comprometido: true }]);
+      assert.equal(r.status, 200, r.texto);
+      assert.deepEqual([r.json.equipos_nuevos, r.json.puertos_nuevos, r.json.pivotes_nuevos], [2, 2, 1]);
+      const m = await panel("lector", "GET", "/resumen") && (await pedir("GET", `/api/engagements/${E.a}/attack-map`, { bearer: token("lector") })).json;
+      const n = m.nodes.find((x) => x.ip === "10.10.1.1"), h = m.nodes.find((x) => x.fqdn === "app.ejemplo.com");
+      assert.equal(n.type, "linux"); assert.equal(n.notes, "DMZ"); assert.deepEqual(n.ports.map((x) => [x.port, x.proto, x.service]), [[22, "tcp", "ssh OpenSSH 9.6"], [53, "udp", ""]]);
+      assert.equal(h.owned, true); assert.deepEqual(m.edges, [{ from: n.id, to: h.id }]);
+      // Aprobar lo que ya está no duplica.
+      assert.equal((await aprobar(p.json.propuesta_id)).status, 200);
+      assert.equal(await equipos(), 2);
+      assert.equal(await contar("target_ports", "engagement_id=?", [E.a]), 2);
+    });
+    test("🔴 aprobar una propuesta la lleva al mapa, y queda auditada en el engagement", async () => {
+      await limpio();
+      const p = (await mandar("propuesta", [COMPLETO])).json.propuesta_id;
+      const d = (await panel("lector", "GET", `/propuestas/${p}`)).json;
+      assert.equal(d.accion, "mapa"); assert.equal(d.datos.equipos[0].objetivo, "10.10.1.1");
+      const r = await aprobar(p);
+      assert.equal(r.status, 200, r.texto); assert.equal(r.json.finding_id, null);
+      assert.deepEqual((await uno("10.10.1.1")).puertos.map((x) => x.puerto), [22, 53]);
+      assert.equal(await contar("audit_logs", "action='agente_propuesta_aprobar' AND entity='engagements' AND entity_id=?", [E.a]) > 0, true);
+    });
+    test("🔴 completa lo vacío y nunca pisa ni borra lo que cargó una persona", async () => {
+      await limpio();
+      const otro = await agregar({ ip: "10.10.1.9" });
+      const id = await agregar({ ip: "10.10.1.1", os: "windows", notas: "de una persona", owned: true, desde: otro });
+      await sql("INSERT INTO target_ports (id,target_id,engagement_id,port_number,protocol,service_name) VALUES (?,?,?,22,'tcp','ssh-persona')", [uid(), id, E.a]);
+      const r = await mandar("escritura", [COMPLETO, { objetivo: "10.10.1.2" }, { objetivo: "10.10.1.1".replace("1.1", "1.3"), desde: "10.10.1.2" }]);
+      assert.equal(r.status, 200, r.texto);
+      const x = (await mandar("escritura", [{ ...COMPLETO, desde: "10.10.1.2" }])).json;
+      assert.deepEqual(x.conservados.map((c) => c.campo).sort(), ["desde", "notas", "os_type"]);
+      const f = (await sql("SELECT * FROM engagement_targets WHERE id=?", [id]))[0];
+      assert.deepEqual([f.os_type, f.notes, f.owned, f.jumped_from_id], ["windows", "de una persona", 1, otro]);
+      const p = (await sql("SELECT service_name, product, version FROM target_ports WHERE target_id=? AND port_number=22", [id]))[0];
+      assert.deepEqual({ ...p }, { service_name: "ssh-persona", product: "OpenSSH", version: "9.6" });
+    });
+    test("reconoce un equipo por cualquiera de sus nombres, sin importar mayúsculas", async () => {
+      await limpio();
+      await agregar({ ip: "10.10.1.1", fqdn: "App.Ejemplo.com" });
+      const r = (await mandar("escritura", [{ objetivo: "app.ejemplo.COM", os_type: "linux" }])).json;
+      assert.deepEqual([r.equipos_nuevos, await equipos()], [0, 1]);
+      assert.equal((await uno("10.10.1.1")).os_type, "linux");
+    });
+    test("🔴 un equipo fuera de alcance rechaza todo y deja constancia", async () => {
+      await limpio();
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+      for (const k of ["propuesta", "escritura"]) {
+        const r = await mandar(k, [{ objetivo: "10.10.1.1" }, { objetivo: "8.8.8.8" }, { objetivo: "10.10.5.5", puertos: [{ puerto: 80 }] }]);
+        assert.equal(r.status, 422, r.texto); assert.match(r.json.error, /8\.8\.8\.8/);
+      }
+      assert.equal(await equipos(), 0);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 4);
+      assert.equal(await contar("agente_propuestas", "engagement_id=? AND accion='mapa' AND datos LIKE '%8.8.8.8%'", [E.a]), 0);
+    });
+    test("🔴 con un puerto excluido, se anotan los demás puertos y no el excluido", async () => {
+      await limpio();
+      const id = uid();
+      await sql("INSERT INTO scope_items (id,engagement_id,type,value,in_scope) VALUES (?,?,'ip','10.10.1.7:22',0)", [id, E.a]);
+      try {
+        assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.7", puertos: [{ puerto: 443 }] }])).status, 200);
+        assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.7", puertos: [{ puerto: 443 }, { puerto: 22 }] }])).status, 422);
+        assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.7" }])).status, 422);
+      } finally { await sql("DELETE FROM scope_items WHERE id=?", [id]); }
+    });
+    test("🔴 el alcance se vuelve a controlar al aprobar, y lo editado pasa las mismas reglas", async () => {
+      await limpio();
+      const p = (await mandar("propuesta", [{ objetivo: "10.10.1.1" }, { objetivo: "app.ejemplo.com" }])).json.propuesta_id;
+      await sql("UPDATE scope_items SET in_scope=0 WHERE engagement_id=? AND value='app.ejemplo.com'", [E.a]);
+      const r = await aprobar(p);
+      const s = await aprobar(p, { datos: { equipos: [{ objetivo: "10.10.1.1" }, { objetivo: "8.8.8.8" }] } });
+      const v = await aprobar(p, { datos: { equipos: [] } });
+      const ok = await aprobar(p, { datos: { equipos: [{ objetivo: "10.10.1.1" }] } });
+      await sql("UPDATE scope_items SET in_scope=1 WHERE engagement_id=? AND value='app.ejemplo.com'", [E.a]);
+      assert.deepEqual([r.status, s.status, v.status, ok.status], [409, 409, 400, 200], ok.texto);
+      assert.equal(await equipos(), 1);
+      assert.deepEqual((await ag("propuesta", "GET", `/engagements/${E.a}/propuestas?estado=aprobada`)).json.datos.find((x) => x.id === p).campos_editados, ["equipos"]);
+    });
+    test("🔴 pivotes: solo entre equipos del mapa o del pedido, sin ciclos y sin apuntarse a sí mismo", async () => {
+      await limpio();
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "10.10.1.2" }])).status, 422);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "10.10.1.1" }])).status, 422);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "10.10.1.2" }, { objetivo: "10.10.1.2", desde: "10.10.1.1" }])).status, 422);
+      assert.equal(await equipos(), 0, "un pedido con error no deja nada a medias");
+      await agregar({ fqdn: "kali-atacante", os: "kali" });
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "kali-atacante" }, { objetivo: "10.10.1.2", desde: "10.10.1.1" }])).status, 200);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.3", desde: "10.10.1.2" }])).status, 200);
+      assert.equal((await uno("10.10.1.3")).desde, "10.10.1.2");
+      await sql("UPDATE engagement_targets SET jumped_from_id=NULL WHERE engagement_id=? AND ip_address='10.10.1.1'", [E.a]);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.1", desde: "10.10.1.3" }])).status, 422);
+    });
+    test("🔴 no toca el mapa de otro engagement", async () => {
+      await limpio();
+      const id = uid();
+      await sql("INSERT INTO engagement_targets (id,engagement_id,ip_address) VALUES (?,?,'10.10.1.1')", [id, E.b]);
+      assert.equal((await mandar("escritura", [{ ...COMPLETO }], E.b)).status, 404);
+      assert.equal((await mandar("escritura", [COMPLETO])).json.equipos_nuevos, 1);
+      assert.equal((await sql("SELECT os_type FROM engagement_targets WHERE id=?", [id]))[0].os_type, "other");
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.4", desde: "10.10.9.9" }])).status, 422);
+      await sql("DELETE FROM engagement_targets WHERE id=?", [id]);
+    });
+    test("🔴 tipos y formas inesperados dan 400 y no guardan nada", async () => {
+      await limpio();
+      for (const e of [undefined, null, [], {}, "x", [null], ["10.10.1.1"], [{}], [{ objetivo: "" }], [{ objetivo: 5 }], [{ objetivo: "10.10.0.0/24" }], [{ objetivo: "10.10.1.1-5" }], [{ objetivo: "10.10.1.1:80" }],
+        [{ objetivo: "*.ejemplo.com" }], [{ objetivo: "10.10.1.1 10.10.1.2" }], [{ objetivo: "app.ejemplo.com/x" }], [{ objetivo: "ftp://app.ejemplo.com/" }], [{ objetivo: "10.10.1.1" }, { objetivo: "10.10.1.1" }],
+        [{ objetivo: "10.10.1.1", os_type: "temple" }], [{ objetivo: "10.10.1.1", owned: 1 }], [{ objetivo: "10.10.1.1", comprometido: false }], [{ objetivo: "10.10.1.1", comprometido: "si" }],
+        [{ objetivo: "10.10.1.1", puertos: {} }], [{ objetivo: "10.10.1.1", puertos: [80] }], [{ objetivo: "10.10.1.1", puertos: [{ puerto: 0 }] }], [{ objetivo: "10.10.1.1", puertos: [{ puerto: 65536 }] }],
+        [{ objetivo: "10.10.1.1", puertos: [{ puerto: "80" }] }], [{ objetivo: "10.10.1.1", puertos: [{ puerto: 80, protocolo: "icmp" }] }], [{ objetivo: "10.10.1.1", puertos: [{ puerto: 80 }, { puerto: 80 }] }],
+        [{ objetivo: "10.10.1.1", puertos: [{ puerto: 80, state: "x" }] }], [{ objetivo: "https://app.ejemplo.com/", puertos: [{ puerto: 80 }] }], [{ objetivo: "10.10.1.1", notas: "[OCULTO:cred:0a1b2c]" }],
+        Array.from({ length: 51 }, (_, i) => ({ objetivo: `10.10.2.${i}` })), [{ objetivo: "10.10.1.1", puertos: Array.from({ length: 1001 }, (_, i) => ({ puerto: i + 1 })) }]])
+        assert.equal((await mandar("escritura", e)).status, 400, JSON.stringify(e)?.slice(0, 120));
+      assert.equal((await ag("escritura", "POST", `/engagements/${E.a}/mapa`, { equipos: [COMPLETO], otro: 1 })).status, 400);
+      assert.equal(await equipos(), 0);
+    });
+    test("acepta IPv6, nombres y URL", async () => {
+      await limpio();
+      const id = uid();
+      await sql("INSERT INTO scope_items (id,engagement_id,type,value,in_scope) VALUES (?,?,'ip','2001:db8::5',1)", [id, E.a]);
+      try {
+        const r = await mandar("escritura", [{ objetivo: "2001:db8::5", puertos: [{ puerto: 443 }] }, { objetivo: "app.ejemplo.com" }, { objetivo: "https://app.ejemplo.com/Login" }]);
+        assert.equal(r.status, 200, r.texto);
+        const f = await sql("SELECT ip_address,fqdn,url_address FROM engagement_targets WHERE engagement_id=? ORDER BY ip_address DESC, fqdn DESC", [E.a]);
+        assert.deepEqual(f.map((x) => ({ ...x })), [{ ip_address: "2001:db8::5", fqdn: null, url_address: null }, { ip_address: null, fqdn: "app.ejemplo.com", url_address: null }, { ip_address: null, fqdn: null, url_address: "https://app.ejemplo.com/Login" }]);
+      } finally { await sql("DELETE FROM scope_items WHERE id=?", [id]); }
+    });
+    test("🔴 iguales a la vez no duplican equipos, y un reintento no repite", async () => {
+      await limpio();
+      const r = await Promise.all(Array.from({ length: 6 }, () => mandar("escritura", [COMPLETO])));
+      assert.ok(r.every((x) => x.status === 200), r.map((x) => x.texto).join());
+      assert.equal(await equipos(), 1); assert.equal(r.reduce((n, x) => n + x.json.equipos_nuevos, 0), 1);
+      assert.equal(r.reduce((n, x) => n + x.json.puertos_nuevos, 0), 2);
+      const k = { headers: { "Idempotency-Key": uid() } };
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.8" }], E.a, k)).json.equipos_nuevos, 1);
+      assert.equal((await mandar("escritura", [{ objetivo: "10.10.1.8" }], E.a, k)).json.equipos_nuevos, 1);
+      assert.equal(await equipos(), 2);
+    });
+    test("🔴 una propuesta igual a una pendiente se rechaza, y hay tope de pendientes", async () => {
+      await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
+      const p = (await mandar("propuesta", [COMPLETO])).json.propuesta_id;
+      const r = await mandar("propuesta", [{ puertos: COMPLETO.puertos, notas: "DMZ", os_type: "linux", objetivo: "10.10.1.1" }]);
+      assert.equal(r.status, 409); assert.equal(r.json.existente.id, p);
+      for (let i = 0; i < 49; i++) assert.equal((await mandar("propuesta", [{ objetivo: `10.10.3.${i}` }])).status, 202);
+      assert.equal((await mandar("propuesta", [{ objetivo: "10.10.3.99" }])).status, 409);
+      await sql("DELETE FROM agente_propuestas WHERE accion='mapa'");
+    });
+    test("🔴 la lectura se pagina, oculta secretos y no nombra al cliente", async () => {
+      await limpio();
+      const a = await agregar({ ip: "10.10.1.1", notas: "Banco Ficticio password=Sup3rClave9" });
+      await agregar({ ip: "10.10.1.2", desde: a }); await agregar({ fqdn: "app.ejemplo.com" });
+      await sql("INSERT INTO target_ports (id,target_id,engagement_id,port_number,state) VALUES (?,?,?,23,'closed'),(?,?,?,80,'open')", [uid(), a, E.a, uid(), a, E.a]);
+      const x = await uno("10.10.1.1");
+      assert.ok(!/Sup3rClave9|Banco Ficticio/.test(JSON.stringify(x)));
+      assert.deepEqual(x.puertos.map((p) => p.puerto), [80]);
+      assert.equal((await uno("10.10.1.2")).desde, "10.10.1.1");
+      const uno1 = await ver("lectura", "?limite=2"), dos = await ver("lectura", `?limite=2&desde=${uno1.siguiente}`);
+      assert.deepEqual([uno1.datos.length, uno1.hay_mas, dos.datos.length, dos.hay_mas], [2, true, 1, false]);
+      assert.equal(uno1.contenido_no_confiable, true);
+    });
+    test("🔴 un archivo de puertos enorme no inunda la lectura", async () => {
+      await limpio();
+      const a = await agregar({ ip: "10.10.1.1" });
+      await sql("INSERT INTO target_ports (id,target_id,engagement_id,port_number) VALUES ?", [Array.from({ length: 500 }, (_, i) => [uid(), a, E.a, i + 1])]);
+      const x = await uno("10.10.1.1");
+      assert.equal(x.puertos.length, 200); assert.equal(x.puertos_total, 500);
+    });
+    test("queda en la actividad con sus equipos", async () => {
+      await mandar("escritura", [{ objetivo: "10.10.1.1" }, { objetivo: "10.10.1.2" }]);
+      for (let i = 0; i < 40; i++) {
+        const d = (await panel("admin", "GET", `/keys/${keys.escritura_id}/actividad`)).json.datos[0];
+        if (d.accion === "mapa") return assert.equal(d.objetivo, "10.10.1.1, 10.10.1.2");
+        await new Promise((ok) => setTimeout(ok, 50));
+      }
+      assert.fail("no quedó en la actividad");
+    });
+  });
+
   describe("actividad por key", () => {
     const ver = (rol, key, q = "") => panel(rol, "GET", `/keys/${keys[`${key}_id`]}/actividad${q}`);
     // Se anota sin demorar la respuesta: se espera a que aparezca.
