@@ -585,6 +585,12 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
         assert.equal((await ag("propuesta", "GET", `/engagements/${E.a}/propuestas?estado=aprobada`)).json.datos.find((x) => x.id === id).campos_editados, null);
       }
     });
+    test("un espacio de más en lo propuesto no cuenta como edición", async () => {
+      const { h, id } = await proponer();
+      await sql("UPDATE agente_propuestas SET datos=JSON_SET(datos,'$.title',?) WHERE id=?", [`${h.title} `, id]);
+      assert.equal((await aprobar(id, { datos: { ...h, severity: "low" } })).status, 200);
+      assert.deepEqual(json((await fila(id)).campos_editados), ["severity"]);
+    });
     test("🔴 lo editado pasa las mismas reglas: campos, valores, alcance, marcas y duplicados", async () => {
       const { h, id } = await proponer();
       for (const [datos, codigo] of [
@@ -779,6 +785,11 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       const d = await esperar("act3", (x) => x.length === 1);
       assert.match(d[0].detalle, /revocada/);
       assert.equal(d[0].codigo, 401);
+      // Insistir con objetivos distintos no hace crecer la tabla, aunque además supere el límite.
+      for (let i = 0; i < 30; i++) await ag("act3", "POST", `/engagements/${E.a}/logs`, { fase: "recon", objetivo: `10.10.1.${i}`, comando: "x" });
+      const e = await esperar("act3", (x) => x.length === 1 && x[0].veces === 31);
+      assert.deepEqual([e[0].accion, e[0].objetivo], ["acceso", null]);
+      assert.equal(await total(), antes + 1);
       assert.equal(await total(), antes + 1);
     });
     test("se pagina hacia atrás sin repetir ni saltear", async () => {
@@ -794,6 +805,45 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       assert.equal(dos.json.siguiente, null);
       assert.equal(new Set([...r.json.datos, ...dos.json.datos].map((x) => x.id)).size, 60);
       assert.equal((await ver("admin", "act4", "?antes=x")).status, 400);
+    });
+    test("🔴 pasada la cantidad de rechazos distintos por ventana, el resto va a una sola fila", async () => {
+      await nuevaKey("act6", "pentester", "lectura", [E.a]);
+      for (let i = 0; i < 230; i++) await ag("act6", "DELETE", `/engagements/${E.a}/logs/${uid()}`);
+      const n = () => contar("agente_actividad", "key_id=?", [keys.act6_id]);
+      const d = await esperar("act6", (x) => x[0]?.veces === 30);
+      assert.equal(d[0].objetivo, null);
+      assert.equal(await n(), 201);
+    });
+    test("🔴 se conserva 90 días: lo viejo no se muestra y se borra todo, sea cuanto sea", async () => {
+      const { limpiar } = require("../agentes/actividad");
+      const vieja = Array.from({ length: 3000 }, () => [keys.act_id, "log", 201, "vieja", new Date(Date.now() - 120 * 864e5)]);
+      for (let i = 0; i < 4; i++) await sql("INSERT INTO agente_actividad (key_id,accion,codigo,objetivo,ultima_en) VALUES ?", [vieja]);
+      let antes = null;
+      do {
+        const r = (await ver("admin", "act", antes ? `?antes=${antes}` : "")).json;
+        assert.ok(r.datos.every((x) => x.objetivo !== "vieja"));
+        antes = r.siguiente;
+      } while (antes);
+      const recientes = await contar("agente_actividad", "objetivo IS NULL OR objetivo<>'vieja'");
+      await limpiar((q, p) => pool.query(q, p));
+      assert.equal(await contar("agente_actividad", "objetivo='vieja'"), 0);
+      assert.equal(await contar("agente_actividad"), recientes);
+    });
+    test("🔴 el comando se lee del log: si se borra el log, no queda en la actividad", async () => {
+      await nuevaKey("act7", "pentester", "escritura", [E.a]);
+      const r = await ag("act7", "POST", `/engagements/${E.a}/logs`, { fase: "recon", objetivo: "10.10.1.1", comando: "mysql -pSuperSecreta" });
+      const d = await esperar("act7", (x) => x.length === 1);
+      assert.equal(d[0].detalle, "mysql -pSuperSecreta");
+      await sql("DELETE FROM operation_logs WHERE id=?", [r.json.id]);
+      assert.equal((await ver("admin", "act7")).json.datos[0].detalle, null);
+      assert.equal(await contar("agente_actividad", "detalle LIKE '%SuperSecreta%'"), 0);
+    });
+    test("las rutas se reconocen sin importar mayúsculas", async () => {
+      await nuevaKey("act8", "pentester", "escritura", [E.a]);
+      assert.equal((await ag("act8", "POST", `/engagements/${E.a}/Alcance/Verificar`, { objetivos: ["10.10.1.1"] })).status, 200);
+      assert.equal((await ag("act8", "POST", `/engagements/${E.a}/LOGS`, { fase: "recon", notas: "x" })).status, 201);
+      const d = await esperar("act8", (x) => x.length >= 1);
+      assert.deepEqual(d.map((x) => x.accion), ["log"]);
     });
     test("🔴 si no se puede anotar, la escritura responde igual", async () => {
       await sql("RENAME TABLE agente_actividad TO agente_actividad_x");

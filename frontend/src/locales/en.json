@@ -2206,6 +2206,7 @@
       "out_of_scope": "Out of scope",
       "times": "{{count}} times since {{date}}",
       "action": {
+        "acceso": "Access attempt",
         "consulta": "Query",
         "log": "Record log",
         "log_borrar": "Delete log",

@@ -2206,6 +2206,7 @@
       "out_of_scope": "Fuera de alcance",
       "times": "{{count}} veces desde {{date}}",
       "action": {
+        "acceso": "Intento de acceso",
         "consulta": "Consulta",
         "log": "Registrar log",
         "log_borrar": "Borrar log",

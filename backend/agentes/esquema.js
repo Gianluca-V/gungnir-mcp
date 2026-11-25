@@ -105,6 +105,7 @@ async function crearTablas({ qRun }) {
     codigo SMALLINT NOT NULL,
     objetivo VARCHAR(500) NULL,
     detalle VARCHAR(500) NULL,
+    ref_id VARCHAR(36) NULL,
     fuera TINYINT(1) NOT NULL DEFAULT 0,
     veces INT UNSIGNED NOT NULL DEFAULT 1,
     creada_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

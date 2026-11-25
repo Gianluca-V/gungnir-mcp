@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const N = require("./niveles");
 const H = require("./hallazgos");
 const { evaluar } = require("./alcance");
+const { DIAS: ACTIVIDAD_DIAS } = require("./actividad");
 const { nuevaKey, hashDeKey } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero } = require("./comun");
 
@@ -105,9 +106,9 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     const filtro = opcion(req.query.filtro, "filtro", ["rechazos", "fuera"]);
     const antes = entero(req.query.antes, "antes", { min: 1, max: Number.MAX_SAFE_INTEGER, porDefecto: null });
     const filas = await qRows(
-      `SELECT a.id, a.accion, a.codigo, a.objetivo, a.detalle, a.fuera, a.veces, a.creada_en, a.ultima_en, e.title AS engagement_title
-       FROM agente_actividad a LEFT JOIN engagements e ON e.id=a.engagement_id
-       WHERE a.key_id=?${antes ? " AND a.id<?" : ""}${filtro === "rechazos" ? " AND a.codigo>=400" : filtro === "fuera" ? " AND a.fuera=1" : ""}
+      `SELECT a.id, a.accion, a.codigo, a.objetivo, COALESCE(a.detalle, LEFT(l.command,500)) AS detalle, a.fuera, a.veces, a.creada_en, a.ultima_en, e.title AS engagement_title
+       FROM agente_actividad a LEFT JOIN engagements e ON e.id=a.engagement_id LEFT JOIN operation_logs l ON l.id=a.ref_id
+       WHERE a.key_id=? AND a.ultima_en >= NOW() - INTERVAL ${ACTIVIDAD_DIAS} DAY${antes ? " AND a.id<?" : ""}${filtro === "rechazos" ? " AND a.codigo>=400" : filtro === "fuera" ? " AND a.fuera=1" : ""}
        ORDER BY a.id DESC LIMIT ${POR_PAGINA + 1}`, [k.id, ...(antes ? [antes] : [])]);
     const datos = filas.slice(0, POR_PAGINA).map((x) => ({ ...x, fuera: Boolean(x.fuera) }));
     res.json({ datos, siguiente: filas.length > POR_PAGINA ? datos.at(-1).id : null });
@@ -222,7 +223,8 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
 
   /** Los campos en que lo aprobado difiere de lo propuesto, incluidos los que se sacaron. */
   function camposEditados(propuesto, aprobado) {
-    const igual = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const normal = (v) => (typeof v === "string" ? v.trim() || null : v ?? null); // validar() recorta espacios.
+    const igual = (a, b) => JSON.stringify(normal(a)) === JSON.stringify(normal(b));
     return [...new Set([...Object.keys(propuesto), ...Object.keys(aprobado)])]
       .filter((k) => k in propuesto !== k in aprobado || !igual(propuesto[k], aprobado[k]));
   }

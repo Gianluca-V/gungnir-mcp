@@ -36,7 +36,7 @@ export function BotonPausa() {
   const { data } = useResumenAgentes()
   const pausar = usePausar()
   const [confirmar, setConfirmar] = useState(false)
-  if (!decide || !data || data.pausa) return null
+  if (!decide || data?.pausa) return null
   return (
     <>
       <Button variant='outline' onClick={() => setConfirmar(true)}>

@@ -43,7 +43,7 @@ interface Props {
 export function DialogoPropuesta(props: Props) {
   const { t } = useTranslation()
   const { propuesta, ocupado, cerrar } = props
-  // Sin refresco de fondo: no se pisa lo que se está escribiendo.
+  // Si un refresco falla con el formulario a la vista, se sigue con lo que había: lo escrito no se pierde.
   const consulta = useQuery<DetallePropuesta>({
     queryKey: ['agentes', 'propuesta', propuesta.id],
     queryFn: () =>
@@ -70,7 +70,7 @@ export function DialogoPropuesta(props: Props) {
         </DialogHeader>
         <Estado
           cargando={consulta.isLoading}
-          error={consulta.isError}
+          error={consulta.isError && !consulta.data}
           reintentar={() => consulta.refetch()}
           vacio={false}
           textoVacio={null}
