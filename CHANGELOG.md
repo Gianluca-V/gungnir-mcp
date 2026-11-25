@@ -22,6 +22,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Agentes y personas pueden editar el Attack Map a la vez: cada uno conserva lo suyo y los choques de la base se reintentan.
 - Guía de uso y configuración en `docs/guia-gungnir-mcp.html`.
 
+### Corregido
+- Docker: el volumen de evidencias se monta donde el backend las guarda. Quien ya tenga una instalación tiene que copiar `/uploads` antes de recrear el contenedor.
+
 ### Cambiado
 - El límite general de pedidos ya no cuenta los de `/api/agente/v1`, que tienen el suyo.
 - La base suma tablas `agente_*` y dos columnas en `operation_logs`.

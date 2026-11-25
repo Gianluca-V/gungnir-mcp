@@ -41,7 +41,9 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - gungnir_uploads:/app/uploads
+      # El backend guarda en la carpeta de al lado de /app. Antes se montaba /app/uploads y las evidencias se
+      # perdían al recrear el contenedor.
+      - gungnir_uploads:/uploads
 
 volumes:
   gungnir_db:
