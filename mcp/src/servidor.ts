@@ -217,6 +217,11 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
         const logs: unknown[] = []
         for (const objetivo of a.objetivos) {
           const log = await cliente.pedir('POST', `${ruta}/logs`, { cuerpo: { fase: a.fase, objetivo, herramienta: a.herramienta, comando } })
+            .catch((e: unknown) => {
+              // Los logs anteriores ya quedaron: se dice cuáles son y que no corrió nada.
+              if (!(e instanceof ErrorGungnir)) throw e
+              throw new ErrorGungnir(`No se ejecutó: falló el registro de un objetivo. ${e.message}`, e.codigo, { ...e.detalle, logs_sin_ejecucion: logs })
+            })
           logs.push(log['id'])
           if (log['fuera_de_alcance'] === true) throw new ErrorGungnir('No se ejecutó: el registro marcó un objetivo como fuera de alcance.', null, { logs })
         }
@@ -224,6 +229,8 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
           const r = await ejecutor.ejecutar({ herramienta: a.herramienta, argumentos: a.argumentos, objetivos: a.objetivos }, cancelar)
           return { contenido_no_confiable: true, logs, ...r }
         } catch (e) {
+          // Lo que el ejecutor dice a propósito llega al agente; lo inesperado, solo al registro local.
+          if (e instanceof ErrorGungnir) throw new ErrorGungnir(`${e.message} La acción quedó registrada.`, e.codigo, { ...e.detalle, logs })
           console.error('[gungnir-mcp] ejecutor:', e instanceof Error ? e.message : e)
           throw new ErrorGungnir('La herramienta falló. La acción quedó registrada.', null, { logs })
         }

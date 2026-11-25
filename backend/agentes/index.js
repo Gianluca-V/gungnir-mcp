@@ -27,10 +27,10 @@ function montar(app, deps) {
 
   // El correo arma su cuerpo en HTML: lo que escribió un agente entra escapado.
   const avisar = (f, e) => notificarHallazgo(f && { ...f, title: escaparHtml(f.title), affected_asset: escaparHtml(f.affected_asset) }, e);
-  /** Aviso de un hallazgo nuevo. Nunca lanza: el hallazgo ya está guardado. */
+  /** Aviso de un hallazgo nuevo. Nunca lanza ni espera al correo: el hallazgo ya está guardado. */
   const avisarSeguro = async (id, buscar) => {
-    try { await avisar(await qRow("SELECT * FROM findings WHERE id=?", [id]), await buscar()); }
-    catch (e) { console.error(`[GUNGNIR] Agentes: no se pudo avisar el hallazgo ${id}:`, e.message); }
+    const fallo = (e) => console.error(`[GUNGNIR] Agentes: no se pudo avisar el hallazgo ${id}:`, e.message);
+    try { avisar(await qRow("SELECT * FROM findings WHERE id=?", [id]), await buscar()).catch(fallo); } catch (e) { fallo(e); }
   };
   const notificar = (id, titulo) => avisarSeguro(id, () => ({ name: escaparHtml(titulo) }));
 

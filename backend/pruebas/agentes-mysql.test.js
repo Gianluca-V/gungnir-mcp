@@ -22,7 +22,7 @@ const V1 = "/api/agente/v1";
 const uid = () => crypto.randomUUID();
 
 describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" }, () => {
-  let pool, hijo, base, salida = "";
+  let pool, hijo, base, salida = "", correos = 0;
   const suf = crypto.randomBytes(4).toString("hex");
   const U = Object.fromEntries(["admin", "auditor", "pentester", "lector"].map((r) => [r, { id: uid(), role: r }]));
   const E = { a: uid(), b: uid(), cerrado: uid() };
@@ -31,7 +31,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
 
   const token = (r) => jwt.sign({ id: U[r].id, role: r, tv: 0 }, SECRETO);
   const sql = async (q, p) => (await pool.query(q, p))[0];
-  async function pedir(metodo, ruta, { bearer, body, headers = {}, archivo } = {}) {
+  async function pedir(metodo, ruta, { bearer, body, headers = {}, archivo, signal } = {}) {
     const h = { ...headers };
     if (bearer) h.Authorization = `Bearer ${bearer}`;
     let cuerpo;
@@ -40,7 +40,7 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
       for (const [k, v] of Object.entries(body || {})) cuerpo.append(k, v);
       cuerpo.append("archivo", new Blob([archivo.contenido]), archivo.nombre);
     } else if (body !== undefined) { cuerpo = JSON.stringify(body); h["Content-Type"] = "application/json"; }
-    const r = await fetch(base + ruta, { method: metodo, headers: h, body: cuerpo });
+    const r = await fetch(base + ruta, { method: metodo, headers: h, body: cuerpo, signal });
     const texto = await r.text();
     let json = null; try { json = JSON.parse(texto); } catch {}
     return { status: r.status, texto, json, headers: r.headers };
@@ -62,10 +62,14 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
   before(async () => {
     const mysql = require("mysql2/promise");
     const u = new URL(URL_DB);
+    // Un servidor de correo que acepta la conexión y nunca contesta.
+    const smtp = await new Promise((ok) => { const s = net.createServer((c) => { correos++; c.on("error", () => {}).unref(); }); s.listen(0, "127.0.0.1", () => ok(s)); });
+    smtp.unref();
     const puerto = await new Promise((ok) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); }); });
     hijo = spawn(process.execPath, ["server.js"], {
       cwd: BACKEND,
       env: { ...process.env, PORT: String(puerto), NODE_ENV: "test", JWT_SECRET: SECRETO, TRUST_PROXY: "false", VULN_FUENTES_EXTERNAS: "0", AGENTE_LIMITE_15MIN: "5000",
+             SMTP_HOST: "127.0.0.1", SMTP_PORT: String(smtp.address().port), SMTP_SECURE: "false", SMTP_USER: "x", SMTP_PASS: "x",
              DB_HOST: u.hostname, DB_PORT: u.port || "3306", DB_USER: decodeURIComponent(u.username), DB_PASSWORD: decodeURIComponent(u.password), DB_NAME: u.pathname.slice(1) },
     });
     hijo.stdout.on("data", (d) => { salida += d; }); hijo.stderr.on("data", (d) => { salida += d; });
@@ -360,6 +364,44 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
         await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "ninguno" });
         assert.equal((await sql("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].mostrar_sensibles, 0);
       } finally { await acceso("a", "total", false); }
+    });
+    test("🔴 sin acceso no se pueden mostrar datos sensibles: ni a la vez ni antes de habilitarlo", async () => {
+      try {
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "ninguno", mostrar_sensibles: true })).status, 400);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "ninguno" })).status, 200);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { mostrar_sensibles: true })).status, 409);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "lectura" })).status, 200);
+        assert.equal((await sql("SELECT mostrar_sensibles FROM agente_engagements WHERE engagement_id=?", [E.a]))[0].mostrar_sensibles, 0);
+        await sql("DELETE FROM agente_engagements WHERE engagement_id=?", [E.a]);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { mostrar_sensibles: true })).status, 409);
+        assert.equal((await panel("auditor", "PUT", `/engagements/${E.a}`, { nivel_max: "lectura", mostrar_sensibles: true })).status, 200);
+      } finally { await acceso("a", "total", false); }
+    });
+    test("🔴 un servidor de correo que no contesta no demora el alta de un hallazgo", async () => {
+      const aviso = JSON.stringify({ email_enabled: true, email_to: "x@example.com", min_severity: "high" });
+      await sql("INSERT INTO settings (`key`,`value`) VALUES ('notificaciones',?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)", [aviso]);
+      const antes = correos;
+      try {
+        const r = await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo({ severity: "critical" }), { signal: AbortSignal.timeout(4000) });
+        assert.equal(r.status, 201, r.texto);
+        for (let i = 0; i < 40 && correos === antes; i++) await new Promise((ok) => setTimeout(ok, 50));
+        assert.equal(correos, antes + 1, "el aviso se intenta igual");
+      } finally { await sql("DELETE FROM settings WHERE `key`='notificaciones'"); }
+    });
+    test("🔴 el tope de lectura cuenta lo que pasa la severidad mínima, y al superarlo también deja constancia", async () => {
+      // 23 es de severidad alta para el lector de nmap; los puertos 30000 y siguientes, informativos.
+      const puertos = (ip, desde, n) => `<host><status state="up"/><address addr="${ip}" addrtype="ipv4"/><ports>${Array.from({ length: n }, (_, i) => `<port protocol="tcp" portid="${desde + i}"><state state="open"/></port>`).join("")}</ports></host>`;
+      const grande = `<nmaprun>${puertos("10.10.8.1", 23, 1)}${puertos("10.10.8.1", 30000, 20100)}${puertos("8.8.4.9", 30000, 1)}</nmaprun>`;
+      const subir = (severidad_minima) => ag("escritura", "POST", `/engagements/${E.a}/importar`, { formato: "nmap", severidad_minima }, { archivo: { nombre: "s.xml", contenido: grande } });
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+      const r = await subir("high");
+      assert.equal(r.status, 201, r.texto);
+      assert.equal(r.json.hallazgos_creados, 1);
+      assert.equal(r.json.leidos, 20102);
+      assert.equal(r.json.bajo_severidad_minima, 20100);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 1);
+      assert.equal((await subir("info")).status, 413);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 2);
     });
     test("🔴 en lote, un error inesperado no frena al resto", async () => {
       const ids = [];

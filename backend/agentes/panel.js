@@ -115,13 +115,18 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
     let sensibles = req.body.mostrar_sensibles;
     if (sensibles !== undefined && typeof sensibles !== "boolean") throw new ErrorHttp(400, `"mostrar_sensibles" tiene que ser verdadero o falso.`);
     if (nivel === null && sensibles === undefined) throw new ErrorHttp(400, "No hay nada para cambiar.");
+    if (nivel === "ninguno" && sensibles) throw new ErrorHttp(400, "Sin acceso no se pueden mostrar datos sensibles.");
     // Quitar el acceso vuelve a ocultar: habilitarlo otra vez no muestra datos sin decidirlo de nuevo.
     if (nivel === "ninguno") sensibles = false;
-    const e = await qRow("SELECT id, title FROM engagements WHERE id=?", [req.params.id]);
+    const e = await qRow(
+      "SELECT e.id, e.title, ae.nivel_max FROM engagements e LEFT JOIN agente_engagements ae ON ae.engagement_id=e.id WHERE e.id=?", [req.params.id]);
     if (!e) throw new ErrorHttp(404, "El engagement no existe.");
+    if (sensibles && nivel === null && (e.nivel_max ?? "ninguno") === "ninguno")
+      throw new ErrorHttp(409, "El engagement ya no tiene acceso: habilitalo antes de mostrar datos sensibles.");
+    // El IF cubre que alguien quite el acceso entre la consulta y esto (nivel_max ya es el valor nuevo).
     await qRun(
       `INSERT INTO agente_engagements (engagement_id,nivel_max,mostrar_sensibles,actualizado_por) VALUES (?,COALESCE(?,'ninguno'),COALESCE(?,0),?)
-       ON DUPLICATE KEY UPDATE nivel_max=COALESCE(?,nivel_max), mostrar_sensibles=COALESCE(?,mostrar_sensibles), actualizado_por=VALUES(actualizado_por)`,
+       ON DUPLICATE KEY UPDATE nivel_max=COALESCE(?,nivel_max), mostrar_sensibles=IF(nivel_max='ninguno',0,COALESCE(?,mostrar_sensibles)), actualizado_por=VALUES(actualizado_por)`,
       ((v) => [e.id, nivel, v, req.user.id, nivel, v])(sensibles === undefined ? null : sensibles ? 1 : 0));
     await anotar(req, "agente_acceso", "engagements", e.id, `${e.title}: ${[nivel && `nivel ${nivel}`, sensibles !== undefined && `datos sensibles ${sensibles ? "visibles" : "ocultos"}`].filter(Boolean).join(", ")}`);
     res.json({ ok: true });

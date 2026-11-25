@@ -7,6 +7,9 @@
  *   2. registra el log antes de ejecutar;
  *   3. devuelve solo el resumen. El original va en `salida`, para importarlo o adjuntarlo.
  *
+ * Para rechazar un pedido y que el agente sepa por qué, el ejecutor lanza `ErrorGungnir`. El mensaje de
+ * cualquier otro error queda en el registro local: puede traer datos internos.
+ *
  * El control vale si el agente no tiene otra terminal. Si la tiene, puede ejecutar por afuera.
  */
 export interface PedidoDeEjecucion {

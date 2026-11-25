@@ -22,7 +22,6 @@ function leer(formato, contenido) {
     throw new ErrorHttp(400, `No se pudo leer el archivo como ${formato}: ${e.message}`);
   }
   crudos = (crudos || []).filter((c) => c && c.title);
-  if (crudos.length > TOPE_LECTURA) throw new ErrorHttp(413, `El archivo trae ${crudos.length} resultados y el tope es ${TOPE_LECTURA}. Dividilo.`);
   if (!crudos.length) throw new ErrorHttp(400, `No se encontraron resultados de ${formato} en el archivo.`);
   return crudos;
 }
@@ -37,21 +36,38 @@ function activosDe(c) {
   return [url, ...[c._ip, c._hostname].filter(Boolean).map((h) => conPuerto(h, c))].filter(Boolean);
 }
 
+const severidadDe = (c) => (SEVERIDADES.includes(c.severity) ? c.severity : "medium");
+const bajoLaMinima = (severidad, minima) => SEVERIDADES.indexOf(severidad) > SEVERIDADES.indexOf(minima);
+
 function aHallazgo(c, activo) {
   const puntaje = Number(c.cvss_score_31);
   return {
-    title: corto(c.title, 500), affected_asset: activo, severity: SEVERIDADES.includes(c.severity) ? c.severity : "medium",
+    title: corto(c.title, 500), affected_asset: activo, severity: severidadDe(c),
     description: corto(c.description, 100000), steps_to_reproduce: corto(c.steps_to_reproduce, 100000), recommendation: corto(c.recommendation, 100000),
     cvss_vector_31: corto(c.cvss_vector_31, 100), cvss_score_31: puntaje > 0 && puntaje <= 10 ? puntaje : null, cwe_id: corto(c.cwe_id, 20),
   };
+}
+
+/** Deja pasar lo que cumple `siempre` y, del resto, un resultado por equipo. */
+function unoPorEquipo(crudos, siempre = () => false) {
+  const equipos = new Set();
+  return crudos.filter((c) => {
+    if (siempre(c)) return true;
+    const equipo = c._ip || c._hostname || activosDe(c)[0];
+    return !equipos.has(equipo) && equipos.add(equipo);
+  });
 }
 
 /** Separa lo importable de lo que queda fuera de alcance o por debajo de la severidad pedida. */
 function clasificar(crudos, items, minima) {
   const aceptados = [], fuera = new Map();
   const evaluar = evaluador(items);
-  let bajoMinimo = 0, sinEquipo = 0;
-  for (const c of crudos) {
+  // En un archivo enorme, de lo que no llega a la severidad pedida se mira un resultado por equipo. Si igual
+  // se pasa, se va a rechazar: alcanza con saber qué equipos estaban fuera de alcance.
+  const acotados = crudos.length <= TOPE_LECTURA ? crudos : unoPorEquipo(crudos, (c) => !bajoLaMinima(severidadDe(c), minima));
+  const excede = acotados.length > TOPE_LECTURA ? acotados.length : 0;
+  let bajoMinimo = crudos.length - acotados.length, sinEquipo = 0;
+  for (const c of excede ? unoPorEquipo(acotados).slice(0, TOPE_LECTURA) : acotados) {
     const activos = activosDe(c);
     if (!activos.length) { sinEquipo++; continue; }
     // El activo que se guarda es el que está en alcance, con su puerto o su ruta. Alcanza con una forma
@@ -61,10 +77,10 @@ function clasificar(crudos, items, minima) {
     const i = r.findIndex((x) => x.dentro);
     if (excluido || i < 0) { fuera.set(c._ip || c._hostname || activos[0], (excluido || r[0]).motivo); continue; }
     const h = aHallazgo(c, activos[i]);
-    if (SEVERIDADES.indexOf(h.severity) > SEVERIDADES.indexOf(minima)) { bajoMinimo++; continue; }
+    if (bajoLaMinima(h.severity, minima)) { bajoMinimo++; continue; }
     aceptados.push(h);
   }
-  return { aceptados, fuera, bajoMinimo, sinEquipo };
+  return { aceptados, fuera, bajoMinimo, sinEquipo, excede };
 }
 
-module.exports = { FORMATOS, TOPE, leer, clasificar };
+module.exports = { FORMATOS, TOPE, TOPE_LECTURA, leer, clasificar };

@@ -39,9 +39,17 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
     windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
     message: { error: "Demasiados intentos con una key inválida. Reintentá en 15 minutos." },
   });
-  // Techo por dirección, antes de mirar la key: acota lo que cuesta rechazar pedidos sin autenticar.
+  // Keys que entraron en este proceso, por su hash. No autorizan nada: solo eximen del techo por dirección.
+  const conocidas = new Set();
+  const keyDe = (req) => {
+    const h = req.headers.authorization;
+    return typeof h === "string" && h.startsWith("Bearer ") ? h.slice(7).trim() : "";
+  };
+  // Techo por dirección, antes de mirar la key: acota lo que cuesta rechazar pedidos sin autenticar. No cuenta
+  // ni frena a una key que ya entró: esa tiene su propio límite.
   const limitePorIp = rateLimit({
-    windowMs: 15 * 60 * 1000, max: limitePorVentana * 4, standardHeaders: false, legacyHeaders: false,
+    windowMs: 15 * 60 * 1000, max: limitePorVentana * 4, standardHeaders: true, legacyHeaders: false,
+    skip: (req) => { const k = keyDe(req); return FORMATO.test(k) && conocidas.has(hashDeKey(k)); },
     message: { error: "Demasiados pedidos desde esta dirección. Reintentá en unos minutos." },
   });
   // Límite propio por key: un agente no agota el cupo del panel ni el de otra key.
@@ -54,14 +62,15 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
   const rechazar = (req, res, mensaje) => limiteFallidos(req, res, () => res.status(401).json({ error: mensaje }));
 
   const autenticar = ruta(async (req, res, next) => {
-    const h = req.headers.authorization;
-    const key = typeof h === "string" && h.startsWith("Bearer ") ? h.slice(7).trim() : "";
+    const key = keyDe(req);
     if (!FORMATO.test(key)) return rechazar(req, res, "Falta una key de agente válida (Authorization: Bearer gnga_...).");
+    const hash = hashDeKey(key);
     const k = await qRow(
       `SELECT k.id, k.nombre, k.nivel_max, k.revocada_en IS NOT NULL AS revocada, k.expira_en <= NOW() AS vencida,
               (k.ultimo_uso IS NULL OR k.ultimo_uso < NOW() - INTERVAL 1 MINUTE) AS anotar_uso,
               u.id AS user_id, u.username, u.role, u.is_active, u.must_change_password
-       FROM agente_keys k JOIN users u ON u.id=k.user_id WHERE k.hash=?`, [hashDeKey(key)]);
+       FROM agente_keys k JOIN users u ON u.id=k.user_id WHERE k.hash=?`, [hash]);
+    if (!k || !k.is_active || k.revocada || k.vencida) conocidas.delete(hash);
     if (!k || !k.is_active) return rechazar(req, res, "La key no es válida.");
     if (k.revocada) return rechazar(req, res, "La key fue revocada.");
     if (k.vencida) return rechazar(req, res, "La key está vencida.");
@@ -70,6 +79,7 @@ function crear({ qRow, qRun, secretoBase, limitePorVentana = 3000 }) {
       keyId: k.id, keyNombre: k.nombre, userId: k.user_id, username: k.username, rol: k.role,
       nivelMax: N.efectivo(k.nivel_max, N.techoDeRol(k.role)),
     };
+    conocidas.add(hash);
     // Es un dato informativo: que falle o espere un bloqueo no puede frenar el pedido.
     if (k.anotar_uso) qRun("UPDATE agente_keys SET ultimo_uso=NOW() WHERE id=?", [k.id]).catch(() => {});
     next();

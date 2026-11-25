@@ -33,16 +33,24 @@ import {
 type Cambio = Pick<EngagementAcceso, 'id'> &
   Partial<Pick<EngagementAcceso, 'nivel_max' | 'mostrar_sensibles'>>
 
+interface PorConfirmar {
+  cual: 'total' | 'sensitive'
+  titulo: string
+  cambio: Cambio
+}
+
 export function Accesos() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const { administraAcceso } = usePermisosAgentes()
   // Lo que da más poder o muestra datos se confirma antes de aplicarse.
-  const [porConfirmar, setPorConfirmar] = useState<{
-    cual: 'total' | 'sensitive'
-    titulo: string
-    cambio: Cambio
-  } | null>(null)
+  const [porConfirmar, setPorConfirmar] = useState<PorConfirmar | null>(null)
+  // El texto se mantiene mientras el diálogo se cierra.
+  const [texto, setTexto] = useState<PorConfirmar | null>(null)
+  function pedirConfirmacion(p: PorConfirmar) {
+    setTexto(p)
+    setPorConfirmar(p)
+  }
 
   const consulta = useQuery<EngagementAcceso[]>({
     queryKey: ['agentes', 'engagements'],
@@ -55,16 +63,17 @@ export function Accesos() {
     onError: (e: Error) => toast.error(e.message),
     onSettled: () => {
       setPorConfirmar(null)
-      qc.invalidateQueries({ queryKey: ['agentes', 'engagements'] })
+      // Se espera: los controles no se habilitan con el valor viejo a la vista.
+      return qc.invalidateQueries({ queryKey: ['agentes', 'engagements'] })
     },
   })
 
   function cambiar(e: EngagementAcceso, parte: Partial<Cambio>) {
     const cambio = { id: e.id, ...parte }
     if (parte.nivel_max === 'total')
-      setPorConfirmar({ cual: 'total', titulo: e.title, cambio })
+      pedirConfirmacion({ cual: 'total', titulo: e.title, cambio })
     else if (parte.mostrar_sensibles)
-      setPorConfirmar({ cual: 'sensitive', titulo: e.title, cambio })
+      pedirConfirmacion({ cual: 'sensitive', titulo: e.title, cambio })
     else guardar.mutate(cambio)
   }
 
@@ -185,13 +194,13 @@ export function Accesos() {
       <ConfirmDialog
         open={!!porConfirmar}
         onOpenChange={(v) => !v && setPorConfirmar(null)}
-        title={t(`agentes.access.${porConfirmar?.cual ?? 'total'}_title`)}
-        desc={t(`agentes.access.${porConfirmar?.cual ?? 'total'}_desc`, {
-          title: porConfirmar?.titulo ?? '',
+        title={t(`agentes.access.${texto?.cual ?? 'total'}_title`)}
+        desc={t(`agentes.access.${texto?.cual ?? 'total'}_desc`, {
+          title: texto?.titulo ?? '',
           interpolation: { escapeValue: false },
         })}
         confirmText={t(
-          `agentes.access.${porConfirmar?.cual ?? 'total'}_confirm`
+          `agentes.access.${texto?.cual ?? 'total'}_confirm`
         )}
         destructive
         isLoading={guardar.isPending}

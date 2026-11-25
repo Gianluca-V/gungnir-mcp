@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const N = require("../agentes/niveles");
 const { evaluar } = require("../agentes/alcance");
 const O = require("../agentes/ocultar");
+const acceso = require("../agentes/acceso");
 
 describe("niveles de autonomía", () => {
   test("vale el más restrictivo entre la key y el engagement", () => {
@@ -97,6 +98,16 @@ describe("alcance", () => {
   test("una dirección mal escrita tampoco vale como dominio dentro de alcance", () => {
     for (const x of ["10.0.0.x", "10.0.0-1.1-20", "/admin"]) assert.equal(dentro(x, en("domain", x)), false, x);
     for (const x of ["10.0.0.5.nip.io", "163.com", "4.3.2.1.in-addr.arpa", "1.lab.acme.com", "1.2.acme.com", "168.192.in-addr.arpa"]) assert.equal(dentro(x, en("domain", x)), true, x);
+  });
+  // Hallazgos de la revisión de las correcciones.
+  describe("🔴 un nombre numérico con un dominio de primer nivel real no es una dirección mal escrita", () => {
+    for (const x of ["123.xyz", "1.2.xyz", "12.nz", "360.xxx", "123.xn--80adxhks", "12.xn--90ais"])
+      test(x, () => {
+        assert.equal(dentro(x, en("domain", x)), true);
+        assert.equal(dentro("10.0.0.10", RED, fuera("domain", x)), true, "excluirlo no cierra todo el engagement");
+      });
+    for (const x of ["10.0.x", "10.0.xx", "10.x.xxx", "10.0.1-20", "10.0.0–20", "10.0.0.xyz"])
+      test(`${x} sigue siendo ilegible`, () => assert.equal(dentro("10.0.0.10", RED, fuera("domain", x)), false));
   });
   test("un nombre sin puntos solo vale si va solo", () => {
     assert.equal(dentro("DC01", en("domain", "DC01")), true);
@@ -223,5 +234,28 @@ describe("ocultamiento", () => {
       "-u a:".repeat(40000), "mysql -p".repeat(25000), "-H ".repeat(66000), "a::b:".repeat(40000), "'password','".repeat(18000), "token".repeat(40000), "-hashes :".repeat(22000)];
     for (const s of hostiles) o.texto(s);
     assert.ok(Date.now() - t0 < 4000, `tardó ${Date.now() - t0} ms`);
+  });
+});
+
+describe("límite por dirección", () => {
+  test("🔴 una key que ya entró no queda bloqueada por pedidos sin autenticar de la misma dirección", async () => {
+    const buena = acceso.nuevaKey(), hash = acceso.hashDeKey(buena);
+    const app = require("express")();
+    const a = acceso.crear({
+      qRow: async (q, [h]) => (h === hash ? { id: "k", nombre: "k", nivel_max: "lectura", user_id: "u", username: "u", role: "admin", is_active: 1 } : null),
+      qRun: async () => {}, secretoBase: "x", limitePorVentana: 10, // Techo por dirección: 40.
+    });
+    app.get("/", a.limitePorIp, a.autenticar, (req, res) => res.json({ ok: true }));
+    const srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+    try {
+      const pedir = (k) => fetch(`http://127.0.0.1:${srv.address().port}/`, { headers: { Authorization: `Bearer ${k}` } });
+      assert.equal((await pedir(buena)).status, 200);
+      for (let i = 0; i < 45; i++) await (await pedir("gnga_" + "1".repeat(64))).text();
+      const r = await pedir("gnga_" + "1".repeat(64));
+      assert.equal(r.status, 429);
+      assert.ok(r.headers.get("retry-after"), "dice cuándo reintentar");
+      assert.equal((await pedir(buena)).status, 200);
+      assert.equal((await pedir(acceso.nuevaKey())).status, 429);
+    } finally { srv.closeAllConnections(); srv.close(); }
   });
 });

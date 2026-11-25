@@ -2277,6 +2277,7 @@
       "approve_selected": "Aprobar {{count}}",
       "select": "Seleccionar {{title}}",
       "select_all": "Seleccionar todas",
+      "truncated": "Se muestran las {{shown}} más recientes de {{total}}. Al decidirlas aparecen las demás.",
       "approved": "Propuesta aprobada",
       "rejected": "Propuesta rechazada",
       "batch_ok": "{{count}} aprobadas",

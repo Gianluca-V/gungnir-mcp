@@ -286,6 +286,21 @@ describe('servidor MCP', () => {
       const r = await x.llamar('ejecutar_herramienta', args)
       assert.ok(r.error); assert.match(r.texto, /quedó registrada[\s\S]*l1/)
     })
+    test('🔴 si se corta a mitad de los registros, no ejecuta y dice cuáles quedaron', async () => {
+      const h: unknown[] = []
+      let n = 0
+      const x = await armar((p) => { if (!p.ruta.endsWith('/logs')) return { todos_dentro: true }; if (++n === 2) throw new ErrorGungnir('caído', 503); return { id: 'log-uno', fuera_de_alcance: false } },
+        { engagement: E1, ejecutor: ejecutor(h) })
+      const r = await x.llamar('ejecutar_herramienta', { ...args, objetivos: ['10.0.0.1', '10.0.0.2'] })
+      assert.ok(r.error); assert.equal(h.length, 0)
+      assert.match(r.texto, /No se ejecutó[\s\S]*caído[\s\S]*log-uno/)
+    })
+    test('🔴 el motivo por el que el ejecutor rechaza un pedido llega al agente', async () => {
+      const x = await armar((p) => (p.ruta.endsWith('/logs') ? { id: 'l1', fuera_de_alcance: false } : { todos_dentro: true }),
+        { engagement: E1, ejecutor: { herramientas: ['nmap'], ejecutar: async () => { throw new ErrorGungnir('El argumento -iL no se admite.', null, { argumento: '-iL' }) } } })
+      const r = await x.llamar('ejecutar_herramienta', args)
+      assert.ok(r.error); assert.match(r.texto, /-iL no se admite[\s\S]*l1/)
+    })
     test('en alcance registra, ejecuta y devuelve el resumen', async () => {
       const h: unknown[] = []
       const x = await armar((p) => (p.ruta.endsWith('/logs') ? { id: 'l1', fuera_de_alcance: false } : { todos_dentro: true }), { engagement: E1, ejecutor: ejecutor(h) })

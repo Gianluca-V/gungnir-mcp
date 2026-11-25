@@ -20,6 +20,7 @@ import {
   Estado,
   useFechaHora,
   usePermisosAgentes,
+  useResumenAgentes,
   type Propuesta,
 } from './comun'
 
@@ -45,6 +46,7 @@ export function Propuestas() {
     refetchInterval: 60_000,
   })
   const filas = consulta.data ?? []
+  const total = useResumenAgentes().data?.propuestas ?? 0
   // Lo que ya se decidió en otro lado deja de contar como elegido.
   const vigentes = filas.filter((p) => elegidas.has(p.id))
 
@@ -134,6 +136,11 @@ export function Propuestas() {
           </>
         }
       >
+        {total > filas.length && (
+          <p role='status' className='text-sm text-muted-foreground'>
+            {t('agentes.proposals.truncated', { shown: filas.length, total })}
+          </p>
+        )}
         {decide && (
           <div className='flex min-h-9 items-center justify-between gap-3'>
             <Label className='flex cursor-pointer items-center gap-2 font-normal'>
