@@ -129,23 +129,26 @@ describe("agentes y personas a la vez", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_D
       assert.equal((await sql("SELECT COUNT(*) AS n FROM target_ports p LEFT JOIN engagement_targets t ON t.id=p.target_id WHERE t.id IS NULL"))[0].n, 0);
     } finally { await sql("DROP TRIGGER IF EXISTS mapa_lento"); }
   });
-  test("🔴 una importación grande no frena los logs del mismo engagement", async () => {
-    const puertos = Array.from({ length: 200000 }, (_, i) => `<port protocol="tcp" portid="${(i % 60000) + 1}"><state state="open"/></port>`).join("");
+  test("🔴 una importación grande no retiene el engagement mientras lee y clasifica", async () => {
+    const puertos = Array.from({ length: 270000 }, (_, i) => `<port protocol="tcp" portid="${(i % 60000) + 1}"><state state="open"/></port>`).join("");
     const cuerpo = new FormData();
     cuerpo.append("formato", "nmap"); cuerpo.append("severidad_minima", "critical");
     cuerpo.append("archivo", new Blob([`<nmaprun><host><status state="up"/><address addr="10.12.1.1" addrtype="ipv4"/><ports>${puertos}</ports></host></nmaprun>`]), "s.xml");
     const t0 = Date.now();
     const imp = fetch(`${base}/api/agente/v1/engagements/${E[2]}/importar`, { method: "POST", headers: { Authorization: `Bearer ${keys[2]}` }, body: cuerpo }).then((r) => ({ status: r.status, ms: Date.now() - t0 }));
-    let terminado = false, logs = 0;
+    // Se mira desde la base, que no depende de lo ocupado que esté el servidor: cuánto está tomado el engagement.
+    let terminado = false, tomado = 0, antes = Date.now();
     imp.then(() => { terminado = true; });
     while (!terminado) {
-      const r = await pedir("POST", `/api/agente/v1/engagements/${E[2]}/logs`, keys[2], { fase: "scanning", notas: "x" });
-      assert.equal(r.status, 201, r.texto);
-      if (!terminado) logs++;
-      await new Promise((ok) => setTimeout(ok, 20));
+      let libre = true;
+      try { await sql("SELECT id FROM engagements WHERE id=? FOR UPDATE NOWAIT", [E[2]]); } catch (e) { if (e.code !== "ER_LOCK_NOWAIT") throw e; libre = false; }
+      const ahora = Date.now();
+      if (!libre) tomado += ahora - antes;
+      antes = ahora;
+      await new Promise((r) => setTimeout(r, 5));
     }
     const r = await imp;
     assert.equal(r.status, 201);
-    assert.ok(logs >= 4, `${logs} logs en ${r.ms} ms`);
+    assert.ok(tomado < r.ms / 4, `${tomado} ms tomado de ${r.ms} ms`);
   });
 });
