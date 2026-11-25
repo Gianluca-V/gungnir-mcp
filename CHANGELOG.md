@@ -13,6 +13,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Ocultamiento por patrones de datos del cliente y secretos en lo que recibe un agente.
 - Pantalla Integraciones > Agentes y aviso en la cabecera.
 - Contenedor opcional para correr el agente aislado, en `agente/`.
+- Pausa de todos los agentes o de un engagement.
+- Actividad por key: escrituras, rechazos y acciones fuera de alcance.
+- Edición de propuestas antes de aprobarlas, con comparación en los cambios.
 - Guía de uso y configuración en `docs/guia-gungnir-mcp.html`.
 
 ### Cambiado

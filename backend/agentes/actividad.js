@@ -71,7 +71,7 @@ function crear({ qRun }) {
       [f.keyId, f.engagementId, f.accion, f.codigo, f.objetivo, f.detalle, f.refId, f.fuera ? 1 : 0]);
     if (deMas) u.resto = r.insertId;
     else Object.assign(u, { firma, id: r.insertId, rechazos: u.rechazos + (rechazo ? 1 : 0) });
-    if (!limpieza) { limpieza = true; await limpiar(qRun); } // Al arrancar; después, una vez por día.
+    if (!limpieza) { limpieza = true; await limpiar(qRun); } // Con la primera anotación del proceso; después, una vez por día.
   }
 
   /** Anota al responder, y no al terminar de enviar: si el cliente cortó, la escritura se hizo igual. */
