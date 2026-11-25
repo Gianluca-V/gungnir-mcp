@@ -29,6 +29,7 @@ const { CATALOGOS: METODOLOGIAS } = require("./data/metodologias");
 const inventarioCommunity = require("./inventario-community");
 const vulnerabilidades    = require("./vulnerabilidades");
 const agentes             = require("./agentes");
+const retest = require("./retest");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -2057,20 +2058,10 @@ app.post("/api/engagements/:id/findings/:fid/retest", auth(ESCRIBEN), async (req
   const f = await qRow("SELECT * FROM findings WHERE id=? AND engagement_id=?", [req.params.fid, req.params.id]);
   if (!f) return res.status(404).json({ error: "No encontrado" });
   const { result, retest_severity, notes } = req.body || {};
-  if (!["passed","failed","partial"].includes(result))
+  if (!retest.RESULTADOS.includes(result))
     return res.status(400).json({ error: "result debe ser passed, failed o partial" });
-  const nuevoStatus = result === "passed" ? "fixed" : result === "failed" ? "open" : "in_remediation";
-  const sevValida = ["critical","high","medium","low","info"];
-  const sevRetest = result === "passed" ? "info"
-    : (retest_severity && sevValida.includes(retest_severity) ? retest_severity : f.severity);
-  await qRun(
-    `UPDATE findings SET retest_status=?, retest_severity=?, retest_notes=?,
-      retested_at=NOW(), retested_by=?, status=? WHERE id=?`,
-    [result, sevRetest, notes || null, req.user.id, nuevoStatus, req.params.fid]
-  );
-  auditLog(req.user.id, req.user.username, "finding_retest", "engagements", req.params.id, `${String(f.title).slice(0,60)} → ${result}`, req.ip);
-  // Si el hallazgo nació de una vulnerabilidad continua, el retest queda en su historial (no la cierra).
-  await require("./vulnerabilidades-engagement").registrarRetest({ qRows, qRun }, req.params.fid, result, req.user.username);
+  await retest.aplicar({ qRun }, f, { result, retest_severity, notes }, req.user.id);
+  await retest.dejarConstancia({ qRows, qRun, auditLog }, f, result, { ...req.user, ip: req.ip });
   res.json(await qRow("SELECT * FROM findings WHERE id=?", [req.params.fid]));
 });
 

@@ -204,16 +204,20 @@ export function Propuestas() {
                     <div className='min-w-0 flex-1 basis-64'>
                       <div className='flex flex-wrap items-center gap-2'>
                         {sev && <BadgeSeveridad s={sev} />}
+                        {p.accion === 'retest' && (
+                          <span className='rounded border bg-muted px-1.5 text-xs'>
+                            {t(
+                              `agentes.option.resultado.${texto(p.datos.resultado)}`,
+                              { defaultValue: texto(p.datos.resultado) }
+                            )}
+                          </span>
+                        )}
                         <span className='text-sm font-medium break-words'>
                           {titulo}
                         </span>
                       </div>
                       <p className='mt-1 text-xs text-muted-foreground'>
-                        {t(
-                          p.accion === 'crear'
-                            ? 'agentes.proposals.new'
-                            : 'agentes.proposals.change'
-                        )}
+                        {t(`agentes.proposals.kind_${p.accion}`)}
                         {' · '}
                         {p.engagement_title}
                         {' · '}
@@ -224,9 +228,9 @@ export function Propuestas() {
                         {' · '}
                         {fecha(p.creada_en)}
                       </p>
-                      {p.datos.affected_asset != null && (
+                      {(p.datos.affected_asset ?? p.datos.objetivo) != null && (
                         <p className='mt-1 font-mono text-xs break-all'>
-                          {texto(p.datos.affected_asset)}
+                          {texto(p.datos.affected_asset ?? p.datos.objetivo)}
                         </p>
                       )}
                       {p.accion === 'actualizar' && p.hallazgo_actual && (
@@ -276,7 +280,13 @@ export function Propuestas() {
                       {Object.entries(p.datos)
                         .filter(
                           ([k]) =>
-                            !['title', 'affected_asset', 'severity'].includes(k)
+                            ![
+                              'title',
+                              'affected_asset',
+                              'severity',
+                              'resultado',
+                              'objetivo',
+                            ].includes(k)
                         )
                         .map(([k, v]) => (
                           <div key={k}>

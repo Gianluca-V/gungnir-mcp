@@ -13,10 +13,11 @@ const texto = (nombre: string, max: number, obligatorio = false): Campo => ({
   max,
   obligatorio,
 })
-const largo = (nombre: string, max = 100_000): Campo => ({
+const largo = (nombre: string, max = 100_000, obligatorio = false): Campo => ({
   nombre,
   tipo: 'largo',
   max,
+  obligatorio,
 })
 const opcion = (nombre: string, ...opciones: string[]): Campo => ({
   nombre,
@@ -57,6 +58,17 @@ export const CAMPOS: Campo[] = [
   ),
   { nombre: 'references_list', tipo: 'lista', max: 50_000 },
 ]
+
+/** Lo que se propone al reprobar un hallazgo. */
+export const CAMPOS_RETEST: Campo[] = [
+  opcion('resultado', 'passed', 'failed', 'partial'),
+  texto('objetivo', 500, true),
+  opcion('retest_severity', 'critical', 'high', 'medium', 'low', 'info'),
+  largo('notas', 20_000, true),
+]
+
+/** Las opciones que se pueden dejar sin valor. */
+export const VACIABLES = new Set(['phase_type', 'retest_severity'])
 
 /** Los que se muestran siempre en un hallazgo nuevo, aunque el agente no los haya mandado. */
 export const CAMPOS_ALTA = new Set([

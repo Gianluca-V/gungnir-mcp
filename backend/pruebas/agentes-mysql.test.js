@@ -721,6 +721,145 @@ describe("agentes de punta a punta", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" 
     });
   });
 
+  describe("retest", () => {
+    const alta = async (extra = {}) => (await ag("escritura", "POST", `/engagements/${E.a}/hallazgos`, hallazgo(extra))).json.hallazgo_id;
+    const viejo = (id) => sql("UPDATE findings SET updated_at=NOW() - INTERVAL 1 HOUR WHERE id=?", [id]);
+    const reprobar = (key, id, b, e = E.a) => ag(key, "POST", `/engagements/${e}/hallazgos/${id}/retest`, b);
+    const aprobar = (id, body, rol = "auditor") => panel(rol, "POST", `/propuestas/${id}/aprobar`, body);
+    const f = async (id) => (await sql("SELECT status,severity,retest_status,retest_severity,retest_notes,retested_by,retested_at FROM findings WHERE id=?", [id]))[0];
+    const OK = { resultado: "passed", notas: "Ya no responde a la comprobación." };
+    test("🔴 en todo nivel es una propuesta y no toca el hallazgo", async () => {
+      for (const k of ["propuesta", "escritura", "total"]) {
+        const id = await alta(), antes = await f(id);
+        const r = await reprobar(k, id, OK);
+        assert.equal(r.status, 202, r.texto);
+        assert.equal(r.json.estado, "pendiente");
+        assert.deepEqual(await f(id), antes);
+      }
+      assert.equal((await reprobar("lectura", await alta(), OK)).status, 403);
+    });
+    test("🔴 al aprobar hace lo mismo que el retest del panel", async () => {
+      for (const [b, status, sev] of [[OK, "fixed", "info"], [{ resultado: "failed", notas: "Sigue igual" }, "open", "high"],
+        [{ resultado: "partial", retest_severity: "low", notas: "Mitigado" }, "in_remediation", "low"]]) {
+        const id = await alta(); await viejo(id);
+        const p = (await reprobar("propuesta", id, b)).json.propuesta_id;
+        const r = await aprobar(p);
+        assert.equal(r.status, 200, r.texto); assert.equal(r.json.finding_id, id);
+        const x = await f(id);
+        assert.deepEqual([x.status, x.retest_status, x.retest_severity, x.retest_notes, x.retested_by, x.severity], [status, b.resultado, sev, b.notas, U.auditor.id, "high"]);
+        assert.ok(x.retested_at);
+        assert.equal(await contar("audit_logs", "action='finding_retest' AND entity_id=? AND user_id=? AND detail LIKE ?", [E.a, U.auditor.id, `% → ${b.resultado}`]) > 0, true);
+      }
+    });
+    test("el retest del panel sigue igual que antes", async () => {
+      for (const [b, status, sev] of [[{ result: "passed" }, "fixed", "info"], [{ result: "failed", notes: "x" }, "open", "high"], [{ result: "partial", retest_severity: "medium" }, "in_remediation", "medium"],
+        [{ result: "failed", retest_severity: "rara" }, "open", "high"]]) {
+        const id = await alta();
+        const r = await pedir("POST", `/api/engagements/${E.a}/findings/${id}/retest`, { bearer: token("pentester"), body: b });
+        assert.equal(r.status, 200, r.texto);
+        assert.deepEqual([r.json.status, r.json.retest_status, r.json.retest_severity, r.json.retest_notes, r.json.retested_by], [status, b.result, sev, b.notes ?? null, U.pentester.id]);
+      }
+      assert.equal((await pedir("POST", `/api/engagements/${E.a}/findings/${uid()}/retest`, { bearer: token("pentester"), body: { result: "passed" } })).status, 404);
+      assert.equal((await pedir("POST", `/api/engagements/${E.a}/findings/${await alta()}/retest`, { bearer: token("pentester"), body: { result: "x" } })).status, 400);
+    });
+    test("🔴 valida lo que llega, y no admite una severidad que se ignoraría", async () => {
+      const id = await alta();
+      for (const b of [{}, { resultado: "passed" }, { notas: "x" }, { resultado: "ok", notas: "x" }, { ...OK, notas: "" }, { ...OK, status: "fixed" }, { ...OK, retest_severity: "low" },
+        { resultado: "failed", retest_severity: "grave", notas: "x" }, { ...OK, notas: "[OCULTO:cred:0a1b2c]" }, { ...OK, notas: { a: 1 } }, { ...OK, objetivo: ["x"] }, []])
+        assert.equal((await reprobar("propuesta", id, b)).status, 400, JSON.stringify(b));
+      assert.equal((await reprobar("propuesta", uid(), OK)).status, 404);
+      assert.equal(await contar("agente_propuestas", "finding_id=?", [id]), 0);
+    });
+    test("🔴 respeta el alcance al proponer y al aprobar", async () => {
+      const id = await alta();
+      const antes = await contar("agente_violaciones", "engagement_id=?", [E.a]);
+      for (const objetivo of ["8.8.8.8", "10.10.5.5"]) assert.equal((await reprobar("propuesta", id, { ...OK, objetivo })).status, 422);
+      assert.equal(await contar("agente_violaciones", "engagement_id=?", [E.a]), antes + 2);
+      // Un activo escrito por una persona puede no ser un objetivo: se indica cuál se probó.
+      await sql("UPDATE findings SET affected_asset='srv-web (10.10.1.1) 80/tcp' WHERE id=?", [id]);
+      assert.equal((await reprobar("propuesta", id, OK)).status, 422);
+      await viejo(id);
+      const p = (await reprobar("propuesta", id, { ...OK, objetivo: "10.10.1.1:80" })).json.propuesta_id;
+      assert.ok(p);
+      await sql("UPDATE scope_items SET in_scope=0 WHERE engagement_id=? AND value='10.10.0.0/16'", [E.a]);
+      const r = await aprobar(p);
+      await sql("UPDATE scope_items SET in_scope=1 WHERE engagement_id=? AND value='10.10.0.0/16'", [E.a]);
+      assert.equal(r.status, 409);
+      assert.equal((await f(id)).retest_status, "not_retested");
+      assert.equal((await aprobar(p)).status, 200);
+    });
+    test("🔴 no reprueba un riesgo aceptado por una persona, ni antes ni después de proponerlo", async () => {
+      const id = await alta(), otro = await alta();
+      await sql("UPDATE findings SET status='accepted' WHERE id=?", [id]);
+      assert.equal((await reprobar("total", id, OK)).status, 409);
+      const p = (await reprobar("propuesta", otro, OK)).json.propuesta_id;
+      await sql("UPDATE findings SET status='accepted' WHERE id=?", [otro]);
+      for (const b of [{}, { forzar: true }]) assert.equal((await aprobar(p, b)).status, 409);
+      assert.equal((await f(otro)).status, "accepted");
+    });
+    test("🔴 un retest pendiente por hallazgo, aunque lleguen a la vez", async () => {
+      const id = await alta();
+      const r = await Promise.all([1, 2, 3, 4].map(() => reprobar("propuesta", id, OK)));
+      assert.deepEqual(r.map((x) => x.status).sort(), [202, 409, 409, 409]);
+      const p = r.find((x) => x.status === 202).json.propuesta_id;
+      assert.equal(r.find((x) => x.status === 409).json.existente.id, p);
+      assert.equal((await panel("auditor", "POST", `/propuestas/${p}/rechazar`, { motivo: "Falta evidencia" })).status, 200);
+      assert.equal((await reprobar("propuesta", id, OK)).status, 202);
+    });
+    test("avisa si el hallazgo cambió en el medio, y se puede editar o forzar", async () => {
+      const id = await alta(); await viejo(id);
+      const p = (await reprobar("propuesta", id, { resultado: "failed", notas: "Sigue" })).json.propuesta_id;
+      let d = (await panel("lector", "GET", `/propuestas/${p}`)).json;
+      assert.equal(d.accion, "retest"); assert.equal(d.cambio, false);
+      assert.deepEqual(d.datos, { resultado: "failed", objetivo: "10.10.1.1:80/tcp", notas: "Sigue" });
+      assert.deepEqual(d.actual, { resultado: "not_retested", objetivo: "10.10.1.1:80/tcp", retest_severity: null, notas: null });
+      await sql("UPDATE findings SET updated_at=NOW() + INTERVAL 5 SECOND WHERE id=?", [id]);
+      const datos = { ...d.datos, resultado: "partial", retest_severity: "medium" };
+      assert.equal((await aprobar(p, { datos })).json.conflicto, true);
+      assert.equal((await aprobar(p, { datos: { ...datos, notas: "" }, forzar: true })).status, 400);
+      assert.equal((await aprobar(p, { datos: { ...datos, objetivo: "8.8.8.8" }, forzar: true })).status, 409);
+      assert.equal((await aprobar(p, { datos, forzar: true })).status, 200);
+      assert.deepEqual([(await f(id)).retest_status, (await f(id)).retest_severity], ["partial", "medium"]);
+      d = (await ag("propuesta", "GET", `/engagements/${E.a}/propuestas?estado=aprobada`)).json.datos.find((x) => x.id === p);
+      assert.deepEqual([d.accion, d.resultado, d.campos_editados.sort()], ["retest", "failed", ["resultado", "retest_severity"]]);
+    });
+    test("el agente ve el estado del retest y filtra por él", async () => {
+      const id = await alta();
+      await sql("UPDATE findings SET remediation_due_date='2030-05-07' WHERE id=?", [id]);
+      await viejo(id);
+      const listar = async (q) => (await ag("lectura", "GET", `/engagements/${E.a}/hallazgos?limite=100&${q}`)).json.datos.find((x) => x.id === id);
+      assert.deepEqual([(await listar("retest=not_retested")).retest_status, (await listar("retest=not_retested")).remediation_due_date], ["not_retested", "2030-05-07"]);
+      await aprobar((await reprobar("propuesta", id, { resultado: "failed", notas: "nota larga" })).json.propuesta_id);
+      assert.equal(await listar("retest=not_retested"), undefined);
+      assert.equal((await listar("retest=failed")).id, id);
+      assert.equal((await ag("lectura", "GET", `/engagements/${E.a}/hallazgos?retest=x`)).status, 400);
+      const d = (await ag("lectura", "GET", `/engagements/${E.a}/hallazgos/${id}`)).json.datos;
+      assert.deepEqual([d.retest_status, d.retest_severity, d.retest_notes], ["failed", "high", "nota larga"]);
+    });
+    test("en lote y en la actividad", async () => {
+      const id = await alta(); await viejo(id);
+      const p = (await reprobar("propuesta", id, OK)).json.propuesta_id;
+      assert.deepEqual((await panel("auditor", "POST", "/propuestas/aprobar-lote", { ids: [p] })).json.aprobadas, [p]);
+      assert.equal((await f(id)).status, "fixed");
+      for (let i = 0; i < 40; i++) {
+        const d = (await panel("admin", "GET", `/keys/${keys.propuesta_id}/actividad`)).json.datos[0];
+        if (d.accion === "retest") return assert.equal(d.codigo, 202);
+        await new Promise((ok) => setTimeout(ok, 50));
+      }
+      assert.fail("no quedó en la actividad");
+    });
+    test("🔴 una instalación con el esquema anterior admite los tipos nuevos sin perder datos", async () => {
+      const { crearTablas } = require("../agentes/esquema");
+      const n = await contar("agente_propuestas", "accion IN ('crear','actualizar')");
+      await sql("DELETE FROM agente_propuestas WHERE accion NOT IN ('crear','actualizar')");
+      await sql("ALTER TABLE agente_propuestas MODIFY accion ENUM('crear','actualizar') NOT NULL");
+      const q = { qRun: (s, p) => pool.query(s, p), qRows: async (s, p) => (await pool.query(s, p))[0] };
+      await crearTablas(q); await crearTablas(q);
+      assert.equal(await contar("agente_propuestas"), n);
+      assert.equal((await reprobar("propuesta", await alta(), OK)).status, 202);
+    });
+  });
+
   describe("actividad por key", () => {
     const ver = (rol, key, q = "") => panel(rol, "GET", `/keys/${keys[`${key}_id`]}/actividad${q}`);
     // Se anota sin demorar la respuesta: se espera a que aparezca.

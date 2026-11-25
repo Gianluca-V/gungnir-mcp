@@ -5,8 +5,8 @@
  */
 const { v4: uuidv4 } = require("uuid");
 const N = require("./niveles");
-const H = require("./hallazgos");
-const { evaluar } = require("./alcance");
+const { TIPOS, comoObjeto } = require("./aprobacion");
+const { evaluador } = require("./alcance");
 const { DIAS: ACTIVIDAD_DIAS } = require("./actividad");
 const { nuevaKey, hashDeKey } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero } = require("./comun");
@@ -16,8 +16,6 @@ const ADMINISTRAN = ["admin", "auditor"];
 const DIAS_POR_DEFECTO = 30;
 const DIAS_MAX = 365;
 const POR_PAGINA = 50;
-
-const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
 
 function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar }) {
   const anotar = (req, accion, entidad, id, detalle) =>
@@ -207,18 +205,9 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       `SELECT p.*, e.title AS engagement_title FROM agente_propuestas p JOIN engagements e ON e.id=p.engagement_id WHERE p.id=?`, [req.params.id]);
     if (!p) throw new ErrorHttp(404, "La propuesta no existe.");
     const datos = comoObjeto(p.datos);
-    let actual = null, cambio = false;
-    if (p.accion === "actualizar") {
-      const campos = Object.keys(datos).filter((k) => H.CAMPOS.includes(k));
-      const f = await qRow(`SELECT updated_at >= ? AS cambio, title AS _titulo${campos.map((k) => `, ${k}`).join("")} FROM findings WHERE id=? AND engagement_id=?`,
-        [p.creada_en, p.finding_id, p.engagement_id]);
-      if (f) {
-        cambio = Boolean(f.cambio);
-        actual = Object.fromEntries(campos.map((k) => [k, k === "references_list" && f[k] ? comoObjeto(f[k]) : f[k]]));
-        p.hallazgo_actual = f._titulo;
-      }
-    }
-    res.json({ ...p, datos, actual, cambio });
+    const a = await TIPOS[p.accion].actual({ qRow, qRows }, p, datos);
+    if (a?.titulo) p.hallazgo_actual = a.titulo;
+    res.json({ ...p, datos, actual: a?.actual ?? null, cambio: Boolean(a?.cambio) });
   }));
 
   /** Los campos en que lo aprobado difiere de lo propuesto, incluidos los que se sacaron. */
@@ -235,30 +224,27 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       if (!p) throw new ErrorHttp(404, "La propuesta no existe.");
       if (p.estado !== "pendiente") throw new ErrorHttp(409, `La propuesta ya fue ${p.estado}.`);
       const propuesto = comoObjeto(p.datos);
-      const datos = editados === undefined ? propuesto : H.validar(editados, { alta: p.accion === "crear" });
+      const tipo = TIPOS[p.accion];
+      const datos = editados === undefined ? propuesto : tipo.validar(editados);
       const campos = camposEditados(propuesto, datos);
-      if (datos.affected_asset) {
-        const a = evaluar(datos.affected_asset, await tx.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [p.engagement_id]));
-        if (!a.dentro) throw new ErrorHttp(409, `El activo ya no está en el alcance: ${a.motivo}`);
+      const objetivos = tipo.objetivos(datos);
+      if (objetivos.length) {
+        const evaluar = evaluador(await tx.qRows("SELECT type,value,in_scope FROM scope_items WHERE engagement_id=?", [p.engagement_id]));
+        for (const o of objetivos) {
+          const a = evaluar(o);
+          if (!a.dentro) throw new ErrorHttp(409, `El activo ya no está en el alcance: ${a.motivo}`);
+        }
       }
-      let findingId = p.finding_id;
-      if (p.accion === "crear") {
-        await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
-        const dup = await tx.qRow("SELECT id FROM findings WHERE engagement_id=? AND title=? AND affected_asset=? AND status<>'fixed' LIMIT 1 FOR UPDATE", [p.engagement_id, datos.title, datos.affected_asset]);
-        if (dup) throw new ErrorHttp(409, "Ya existe un hallazgo con ese título y ese activo: rechazá la propuesta.");
-        findingId = await H.insertar(tx, p.engagement_id, datos, req.user.id);
-      } else {
-        const f = await tx.qRow("SELECT updated_at >= ? AS cambio FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [p.creada_en, p.finding_id, p.engagement_id]);
-        if (!f) throw new ErrorHttp(409, "El hallazgo que se quería modificar ya no existe.");
-        if (f.cambio && !forzar) throw new ErrorHttp(409, "El hallazgo cambió después de la propuesta.", { conflicto: true });
-        await H.modificar(tx, p.engagement_id, p.finding_id, datos);
-      }
+      const { findingId, despues } = await tipo.aplicar(tx, p, datos, {
+        userId: req.user.id, forzar, deps: { qRows, qRun, auditLog }, persona: { id: req.user.id, username: req.user.username, ip: req.ip },
+      });
       await tx.qRun("UPDATE agente_propuestas SET estado='aprobada', finding_id=?, datos_aprobados=?, campos_editados=?, decidida_por=?, decidida_en=NOW() WHERE id=?",
         [findingId, campos.length ? JSON.stringify(datos) : null, campos.length ? JSON.stringify(campos) : null, req.user.id, id]);
-      return { p, findingId, campos };
+      return { p, findingId, campos, despues };
     });
     await anotar(req, "agente_propuesta_aprobar", "findings", r.findingId,
       `Propuesta de la key "${r.p.key_nombre}"${r.campos.length ? `. Editada: ${r.campos.join(", ")}` : ""}`);
+    if (r.despues) await r.despues();
     if (r.p.accion === "crear") notificar(r.findingId, r.p.engagement_id);
     return r.findingId;
   }

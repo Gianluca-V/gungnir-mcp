@@ -7,6 +7,7 @@
 const path = require("path");
 const N = require("./niveles");
 const H = require("./hallazgos");
+const { RESULTADOS } = require("../retest");
 const { evaluador } = require("./alcance");
 const { CAMPOS_CLIENTE, nombresDe } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero, recortar } = require("./comun");
@@ -109,14 +110,16 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
     const sev = opcion(req.query.severidad, "severidad", H.SEVERIDADES);
     const est = opcion(req.query.estado, "estado", [...H.ESTADOS, "accepted"]);
     const fase = opcion(req.query.fase, "fase", H.FASES);
+    const rt = opcion(req.query.retest, "retest", ["not_retested", ...RESULTADOS]);
     const params = [req.engagement.id];
-    let sql = "SELECT id,title,severity,status,cvss_score_31,affected_asset,phase_type,created_at FROM findings WHERE engagement_id=?";
-    for (const [c, v] of [["severity", sev], ["status", est], ["phase_type", fase]]) if (v) { sql += ` AND ${c}=?`; params.push(v); }
+    let sql = "SELECT id,title,severity,status,cvss_score_31,affected_asset,phase_type,created_at,retest_status,DATE_FORMAT(remediation_due_date,'%Y-%m-%d') AS remediation_due_date FROM findings WHERE engagement_id=?";
+    for (const [c, v] of [["severity", sev], ["status", est], ["phase_type", fase], ["retest_status", rt]]) if (v) { sql += ` AND ${c}=?`; params.push(v); }
     await lista(req, res, { sql: `${sql} ORDER BY FIELD(severity,'critical','high','medium','low','info'), title, id`, params });
   }));
 
   router.get("/engagements/:id/hallazgos/:fid", con("lectura"), ruta(async (req, res) => {
-    const f = await qRow(`SELECT id, ${H.CAMPOS.join(",")}, created_at, updated_at FROM findings WHERE id=? AND engagement_id=?`, [req.params.fid, req.engagement.id]);
+    const f = await qRow(`SELECT id, ${H.CAMPOS.join(",")}, created_at, updated_at,
+      retest_status, retest_severity, retest_notes, retested_at, DATE_FORMAT(remediation_due_date,'%Y-%m-%d') AS remediation_due_date FROM findings WHERE id=? AND engagement_id=?`, [req.params.fid, req.engagement.id]);
     if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
     entregar(req, res, { ...f, references_list: comoLista(f.references_list) }, { max: req.query.completo === "1" ? LARGO_COMPLETO : LARGO_CAMPO });
   }));
@@ -125,7 +128,8 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
     const estado = opcion(req.query.estado, "estado", ["pendiente", "aprobada", "rechazada"]);
     await lista(req, res, {
       sql: `SELECT id, accion, finding_id, estado, motivo, campos_editados, creada_en, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.title')) AS title,
-              JSON_UNQUOTE(JSON_EXTRACT(datos,'$.affected_asset')) AS affected_asset, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.severity')) AS severity
+              JSON_UNQUOTE(JSON_EXTRACT(datos,'$.affected_asset')) AS affected_asset, JSON_UNQUOTE(JSON_EXTRACT(datos,'$.severity')) AS severity,
+              JSON_UNQUOTE(JSON_EXTRACT(datos,'$.resultado')) AS resultado
             FROM agente_propuestas WHERE engagement_id=? AND key_id=?${estado ? " AND estado=?" : ""} ORDER BY creada_en DESC, id`,
       params: [req.engagement.id, req.agente.keyId, ...(estado ? [estado] : [])],
       preparar: (p) => ({ ...p, campos_editados: p.campos_editados ? comoLista(p.campos_editados) : null }),

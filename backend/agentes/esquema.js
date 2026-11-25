@@ -77,6 +77,7 @@ async function crearTablas({ qRun }) {
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
   ) ${FIN}`);
 
+  await qRun("ALTER TABLE agente_propuestas MODIFY accion ENUM('crear','actualizar','retest','mapa') NOT NULL");
   // Lo que la persona corrigió al aprobar. `datos` sigue siendo lo que propuso el agente.
   await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN datos_aprobados JSON NULL");
   await agregarColumna(qRun, "ALTER TABLE agente_propuestas ADD COLUMN campos_editados JSON NULL");

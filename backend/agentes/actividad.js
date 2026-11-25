@@ -17,6 +17,7 @@ const ACCIONES = [
   ["POST", /^\/engagements\/[^/]+\/logs\/?$/i, "log"],
   ["DELETE", /^\/engagements\/[^/]+\/logs\//i, "log_borrar"],
   ["POST", /^\/engagements\/[^/]+\/hallazgos\/?$/i, "hallazgo_crear"],
+  ["POST", /^\/engagements\/[^/]+\/hallazgos\/[^/]+\/retest\/?$/i, "retest"],
   ["PUT", /^\/engagements\/[^/]+\/hallazgos\//i, "hallazgo_modificar"],
   ["DELETE", /^\/engagements\/[^/]+\/hallazgos\//i, "hallazgo_borrar"],
   ["POST", /^\/engagements\/[^/]+\/evidencias\/?$/i, "evidencia"],

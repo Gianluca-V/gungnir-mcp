@@ -2211,6 +2211,7 @@
         "log": "Registrar log",
         "log_borrar": "Borrar log",
         "hallazgo_crear": "Crear hallazgo",
+        "retest": "Proponer retest",
         "hallazgo_modificar": "Modificar hallazgo",
         "hallazgo_borrar": "Borrar hallazgo",
         "evidencia": "Adjuntar evidencia",
@@ -2224,8 +2225,9 @@
     "edit": {
       "open": "Editar",
       "title": "Editar y aprobar",
-      "desc_new": "Lo que propuso el agente. Corregí lo que haga falta: se guarda como hallazgo al aprobar.",
-      "desc_change": "Lo que propuso el agente junto al valor actual. Sacá los campos que no quieras aplicar.",
+      "desc_crear": "Lo que propuso el agente. Corregí lo que haga falta: se guarda como hallazgo al aprobar.",
+      "desc_retest": "Lo que el agente dice haber comprobado, junto a lo que hay hoy. Al aprobar, el hallazgo se cierra, se reabre o queda en remediación.",
+      "desc_actualizar": "Lo que propuso el agente junto al valor actual. Sacá los campos que no quieras aplicar.",
       "changed": "El hallazgo se modificó después de la propuesta. Compará antes de aprobar.",
       "include": "Aplicar {{field}}",
       "edited": "Editado",
@@ -2265,9 +2267,26 @@
       "business_risk": "Riesgo de negocio",
       "exploitability": "Explotabilidad",
       "phase_type": "Fase",
-      "references_list": "Referencias"
+      "references_list": "Referencias",
+      "resultado": "Resultado",
+      "objetivo": "Objetivo probado",
+      "retest_severity": "Severidad que queda",
+      "notas": "Qué se probó y qué se observó"
     },
     "option": {
+      "resultado": {
+        "passed": "Corregido",
+        "failed": "Sigue igual",
+        "partial": "Corregido en parte",
+        "not_retested": "Sin reprobar"
+      },
+      "retest_severity": {
+        "critical": "Crítica",
+        "high": "Alta",
+        "medium": "Media",
+        "low": "Baja",
+        "info": "Informativa"
+      },
       "severity": {
         "critical": "Crítica",
         "high": "Alta",
@@ -2392,8 +2411,9 @@
     "proposals": {
       "empty": "No hay propuestas pendientes.",
       "empty_hint": "Cuando un agente en nivel Propuesta cargue un hallazgo, aparece acá.",
-      "new": "Nuevo",
-      "change": "Cambio",
+      "kind_crear": "Nuevo",
+      "kind_actualizar": "Cambio",
+      "kind_retest": "Retest",
       "by": "Key {{key}}",
       "approve": "Aprobar",
       "reject": "Rechazar",

@@ -13,6 +13,7 @@ const { v4: uuidv4 } = require("uuid");
 const N = require("./niveles");
 const H = require("./hallazgos");
 const importacion = require("./importacion");
+const retest = require("./retest");
 const { evaluar } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
@@ -133,10 +134,10 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
   }));
 
   // ── Hallazgos ───────────────────────────────────────────────────────────────
-  const exigirActivoEnAlcance = async (tx, req, activo) => {
+  const exigirActivoEnAlcance = async (tx, req, activo, { que = "El hallazgo", campo = "affected_asset" } = {}) => {
     const a = evaluar(activo, await alcanceDe(tx, req.engagement.id));
     if (a.dentro) return;
-    const e = new ErrorHttp(422, `El hallazgo se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "affected_asset" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
+    const e = new ErrorHttp(422, `${que} se rechazó por alcance: ${req.ocultar.texto(a.motivo, true)} "${campo}" tiene que ser un host, IP, host:puerto o URL dentro de alcance.`);
     e.violaciones = [{ tipo: "hallazgo", objetivo: activo, motivo: a.motivo }];
     throw e;
   };
@@ -172,6 +173,19 @@ function montar(router, { acceso, auditLog, qRow, qRun, transaccion, notificar, 
     }
     await H.modificar(tx, req.engagement.id, f.id, datos);
     return { codigo: 200, cuerpo: { hallazgo_id: f.id, campos: Object.keys(datos) }, despues: () => anotar(req, "hallazgo_modificar", "findings", f.id, Object.keys(datos).join(", ")) };
+  }));
+
+  router.post("/engagements/:id/hallazgos/:fid/retest", con("propuesta"), escribir(async (req, tx) => {
+    const f = await tx.qRow("SELECT id, title, status, affected_asset FROM findings WHERE id=? AND engagement_id=? FOR UPDATE", [req.params.fid, req.engagement.id]);
+    if (!f) throw new ErrorHttp(404, "El hallazgo no existe en este engagement.");
+    const datos = retest.validar(req.body, f.affected_asset);
+    if (f.status === "accepted") throw retest.aceptado();
+    await exigirActivoEnAlcance(tx, req, datos.objetivo, { que: "El retest", campo: "objetivo" });
+    const dup = await tx.qRow("SELECT id FROM agente_propuestas WHERE finding_id=? AND accion='retest' AND estado='pendiente' LIMIT 1", [f.id]);
+    if (dup) throw new ErrorHttp(409, "Ese hallazgo ya tiene un retest pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
+    const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "retest", findingId: f.id, datos });
+    return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El retest lo aprueba una persona en el panel, en cualquier nivel." },
+      despues: () => anotar(req, "propuesta", "agente_propuestas", id, `retest ${datos.resultado} de ${f.title}`) };
   }));
 
   router.delete("/engagements/:id/hallazgos/:fid", con("total"), escribir(async (req, tx) => {

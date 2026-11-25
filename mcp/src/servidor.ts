@@ -128,12 +128,13 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     {
       engagement, tipo: z.enum(['hallazgos', 'propuestas', 'logs', 'evidencias', 'tecnicas']),
       fase: fase.optional().describe('Hallazgos y logs'), severidad: severidad.optional().describe('Hallazgos'),
+      retest: z.enum(['not_retested', 'passed', 'failed', 'partial']).optional().describe('Hallazgos'),
       estado: z.string().optional().describe('Hallazgos: open, in_remediation, fixed, accepted. Propuestas: pendiente, aprobada, rechazada'),
       ...pagina,
     }, LEE,
     async ({ engagement: e, tipo, ...f }) => {
-      const admite: Record<string, string[]> = { hallazgos: ['fase', 'severidad', 'estado'], propuestas: ['estado'], logs: ['fase'], evidencias: [], tecnicas: [] }
-      for (const k of ['fase', 'severidad', 'estado'] as const)
+      const admite: Record<string, string[]> = { hallazgos: ['fase', 'severidad', 'estado', 'retest'], propuestas: ['estado'], logs: ['fase'], evidencias: [], tecnicas: [] }
+      for (const k of ['fase', 'severidad', 'estado', 'retest'] as const)
         if (f[k] !== undefined && !admite[tipo]!.includes(k)) throw new ErrorGungnir(`El filtro "${k}" no aplica a ${tipo}.`)
       return cliente.pedir('GET', `${await base(e)}/${tipo}`, { consulta: f })
     })
@@ -176,6 +177,14 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
   herramienta('modificar_hallazgo', 'Modificar hallazgo', 'Cambia solo los campos enviados. No copies marcas [OCULTO:...] ni [RECORTADO:...].',
     { engagement, id: z.string().uuid(), title: z.string().min(1).max(500).optional(), affected_asset: z.string().min(1).max(500).optional(), ...camposHallazgo }, PISA,
     async ({ engagement: e, id, ...cuerpo }) => cliente.pedir('PUT', `${await base(e)}/hallazgos/${id}`, { cuerpo }))
+
+  herramienta('proponer_retest', 'Proponer retest', 'Propone el resultado de reprobar un hallazgo. Siempre lo aprueba una persona. Adjuntá antes la evidencia.',
+    {
+      engagement, id: z.string().uuid(), resultado: z.enum(['passed', 'failed', 'partial']).describe('passed: corregido. failed: sigue igual. partial: mitigado a medias'),
+      notas: z.string().min(1).max(20000).describe('Qué se probó y qué se observó'), objetivo: z.string().max(500).optional().describe('Por defecto, el activo del hallazgo'),
+      retest_severity: severidad.optional().describe('Severidad que queda. No va con passed'),
+    }, ESCRIBE,
+    async ({ engagement: e, id, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/hallazgos/${id}/retest`, { cuerpo }))
 
   herramienta('adjuntar_evidencia', 'Adjuntar evidencia', 'Sube un archivo de la carpeta de trabajo como evidencia.',
     { engagement, ruta: z.string().min(1).describe('Relativa a la carpeta de trabajo'), hallazgo_id: z.string().uuid().optional(), fase: fase.optional(), descripcion: z.string().max(2000).optional() }, ESCRIBE,

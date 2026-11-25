@@ -2211,6 +2211,7 @@
         "log": "Record log",
         "log_borrar": "Delete log",
         "hallazgo_crear": "Create finding",
+        "retest": "Propose retest",
         "hallazgo_modificar": "Edit finding",
         "hallazgo_borrar": "Delete finding",
         "evidencia": "Attach evidence",
@@ -2224,8 +2225,9 @@
     "edit": {
       "open": "Edit",
       "title": "Edit and approve",
-      "desc_new": "What the agent proposed. Correct whatever is needed: approving saves it as a finding.",
-      "desc_change": "What the agent proposed next to the current value. Remove the fields you do not want to apply.",
+      "desc_crear": "What the agent proposed. Correct whatever is needed: approving saves it as a finding.",
+      "desc_retest": "What the agent says it verified, next to what there is today. Approving closes the finding, reopens it or leaves it in remediation.",
+      "desc_actualizar": "What the agent proposed next to the current value. Remove the fields you do not want to apply.",
       "changed": "The finding changed after the proposal. Compare before approving.",
       "include": "Apply {{field}}",
       "edited": "Edited",
@@ -2265,9 +2267,26 @@
       "business_risk": "Business risk",
       "exploitability": "Exploitability",
       "phase_type": "Phase",
-      "references_list": "References"
+      "references_list": "References",
+      "resultado": "Result",
+      "objetivo": "Target tested",
+      "retest_severity": "Remaining severity",
+      "notas": "What was tested and observed"
     },
     "option": {
+      "resultado": {
+        "passed": "Fixed",
+        "failed": "Still present",
+        "partial": "Partly fixed",
+        "not_retested": "Not retested"
+      },
+      "retest_severity": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        "info": "Info"
+      },
       "severity": {
         "critical": "Critical",
         "high": "High",
@@ -2392,8 +2411,9 @@
     "proposals": {
       "empty": "There are no pending proposals.",
       "empty_hint": "When an agent at Propose level submits a finding, it shows up here.",
-      "new": "New",
-      "change": "Change",
+      "kind_crear": "New",
+      "kind_actualizar": "Change",
+      "kind_retest": "Retest",
       "by": "Key {{key}}",
       "approve": "Approve",
       "reject": "Reject",

@@ -26,8 +26,10 @@ import {
   armarDatos,
   CAMPOS,
   CAMPOS_ALTA,
+  CAMPOS_RETEST,
   comoTexto,
   errorDe,
+  VACIABLES,
   type Campo,
 } from './campos'
 import { Estado, type DetallePropuesta, type Propuesta } from './comun'
@@ -61,11 +63,7 @@ export function DialogoPropuesta(props: Props) {
         <DialogHeader>
           <DialogTitle>{t('agentes.edit.title')}</DialogTitle>
           <DialogDescription>
-            {t(
-              propuesta.accion === 'crear'
-                ? 'agentes.edit.desc_new'
-                : 'agentes.edit.desc_change'
-            )}
+            {t(`agentes.edit.desc_${propuesta.accion}`)}
           </DialogDescription>
         </DialogHeader>
         <Estado
@@ -90,13 +88,22 @@ function Formulario({
 }: Props & { detalle: DetallePropuesta }) {
   const { t } = useTranslation()
   const alta = detalle.accion === 'crear'
-  const campos = CAMPOS.filter(
-    (c) => c.nombre in detalle.datos || (alta && CAMPOS_ALTA.has(c.nombre))
-  )
+  const seSacan = detalle.accion === 'actualizar'
+  const posibles =
+    detalle.accion === 'retest'
+      ? CAMPOS_RETEST
+      : CAMPOS.filter(
+          (c) =>
+            c.nombre in detalle.datos || (alta && CAMPOS_ALTA.has(c.nombre))
+        )
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      campos.map((c) => [c.nombre, comoTexto(detalle.datos[c.nombre])])
+      posibles.map((c) => [c.nombre, comoTexto(detalle.datos[c.nombre])])
     )
+  )
+  // Con "corregido" la severidad queda en informativa: no se elige.
+  const campos = posibles.filter(
+    (c) => c.nombre !== 'retest_severity' || valores.resultado !== 'passed'
   )
   const [sacados, setSacados] = useState<Set<string>>(new Set())
   const vigentes = campos.filter((c) => !sacados.has(c.nombre))
@@ -141,7 +148,7 @@ function Formulario({
             <div key={c.nombre} className='space-y-1.5'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex items-center gap-2'>
-                  {!alta && (
+                  {seSacan && (
                     <Checkbox
                       checked={!fuera}
                       disabled={ocupado}
@@ -245,8 +252,8 @@ function Valor({ campo, valor }: { campo: Campo; valor: unknown }) {
         {t('agentes.proposals.empty_value')}
       </em>
     )
-  return campo.opciones?.includes(s)
-    ? t(`agentes.option.${campo.nombre}.${s}`)
+  return campo.opciones
+    ? t(`agentes.option.${campo.nombre}.${s}`, { defaultValue: s })
     : s
 }
 
@@ -293,7 +300,7 @@ function Control({
         </SelectTrigger>
         <SelectContent>
           {/* Sin valor: en un alta queda el que pone Gungnir por defecto. */}
-          {(!valor || campo.nombre === 'phase_type') && (
+          {(!valor || VACIABLES.has(campo.nombre)) && (
             <SelectItem value={SIN_VALOR}>{t('agentes.edit.unset')}</SelectItem>
           )}
           {campo.opciones.map((o) => (

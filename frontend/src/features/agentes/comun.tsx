@@ -46,7 +46,7 @@ export interface Propuesta {
   id: string
   engagement_title: string
   key_nombre: string
-  accion: 'crear' | 'actualizar'
+  accion: 'crear' | 'actualizar' | 'retest'
   hallazgo_actual: string | null
   datos: Record<string, unknown>
   creada_en: string

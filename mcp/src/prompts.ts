@@ -48,4 +48,11 @@ Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resol
 2. Completá descripción, pasos, recomendación, CVSS y CWE. Usá consultar_cve y buscar_plantillas; ordená por su prioridad.
 3. Revisá la cobertura con ver_metodologia.
 4. Listá duplicados, hallazgos sin evidencia y propuestas pendientes. El PDF se genera desde el panel.`),
+  fase('retest', 'Retest', 'Comprobar si lo reportado se corrigió',
+    `Reprobá los hallazgos que el cliente dice haber corregido.
+1. listar_registros (tipo "hallazgos") por estado y por retest. Ordená por severidad y por vencimiento. Los de estado "accepted" no se reprueban.
+2. ver_hallazgo con "completo": repetí los pasos originales, sin ampliar la prueba.
+3. Adjuntá la evidencia del resultado con adjuntar_evidencia.
+4. proponer_retest por cada uno: "passed" solo si lo comprobaste; si no se pudo probar, no propongas nada y decí por qué.
+Una corrección que abre otro problema es un hallazgo nuevo. Cerrá con un resumen de lo propuesto y lo que quedó sin probar.`),
 ]
