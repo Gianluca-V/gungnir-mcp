@@ -76,6 +76,7 @@ Verificá con `opencode mcp list`.
 | `GUNGNIR_ENGAGEMENT` | Engagement por defecto | el único accesible |
 | `GUNGNIR_TIEMPO_SEGUNDOS` | Espera máxima por pedido | 30 |
 | `GUNGNIR_PERMITIR_HTTP` | `1` admite http hacia otro equipo. La key viaja sin cifrar | no |
+| `GUNGNIR_EN_CONTENEDOR` | La pone el contenedor: ahí, `host.docker.internal` cuenta como equipo local | no |
 
 En el servidor, `AGENTE_LIMITE_15MIN` cambia el límite de pedidos por key cada 15 minutos (3000).
 
@@ -168,5 +169,7 @@ En el backend: `npm test`. Para las pruebas de punta a punta de los agentes hace
 ```bash
 GUNGNIR_PRUEBA_DB=mysql://usuario:clave@127.0.0.1:3306/base_de_prueba node --test pruebas/agentes-mysql.test.js
 ```
+
+Para correr todo contra una base vacía, sumá `--test-concurrency=1` la primera vez: las tablas las crea el primer arranque.
 
 Al traer novedades del upstream, corré `npm run arsenal` en `backend/`.
