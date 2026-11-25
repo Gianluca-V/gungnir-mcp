@@ -20,7 +20,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Attack Map: los agentes lo consultan y suman o proponen equipos, puertos y pivotes, sin pisar lo cargado por personas.
 - `consultar_cve` suma KEV, EPSS y prioridad.
 - Agentes y personas pueden editar el Attack Map a la vez: cada uno conserva lo suyo y los choques de la base se reintentan.
-- Guía de uso y configuración en `docs/guia-gungnir-mcp.html`.
 
 ### Corregido
 - Docker: el volumen de evidencias se monta donde el backend las guarda. Quien ya tenga una instalación tiene que copiar `/uploads` antes de recrear el contenedor.
