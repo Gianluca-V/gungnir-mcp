@@ -80,6 +80,16 @@ function validarActualizacion(b) {
   return contenido;
 }
 
+/** Borrador del resumen del informe. Es lo que lee el cliente: siempre lo aprueba una persona. */
+function validarResumen(b) {
+  exigirCampos(b, ["resumen"], "del resumen");
+  const resumen = texto(b.resumen, "resumen", { max: MAX_TEXTO, obligatorio: true });
+  H.exigirSinMarcas(resumen);
+  return { resumen };
+}
+const huellaDeResumen = (e) => crypto.createHash("sha256").update(JSON.stringify([e.report_summary ?? null])).digest("hex");
+
 module.exports = {
   FASES, ESTADOS_FASE, MAX_TEXTO, validarTiempo, validarFase, validarFaseCustom, huellaDeFase, aplicarFaseCustom, validarActualizacion,
+  validarResumen, huellaDeResumen,
 };

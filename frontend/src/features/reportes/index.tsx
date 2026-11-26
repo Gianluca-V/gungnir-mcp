@@ -11,6 +11,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api'
 import { generatePentestReport, type PentestReportData, type FindingDetail } from '@/lib/pentest-pdf'
@@ -29,6 +31,7 @@ interface EngagementItem {
   methodology: string
   notes?: string
   lead_name?: string
+  report_summary?: string | null
 }
 
 interface ScopeItem {
@@ -140,6 +143,8 @@ export function Reportes() {
   const [includeSteps, setIncludeSteps]   = useState(true)
   const [includeScope, setIncludeScope]   = useState(true)
   const [onlyOpen, setOnlyOpen]           = useState(false)
+  const [summary, setSummary]             = useState('')
+  const [savingSummary, setSavingSummary] = useState(false)
   const [reportTemplate, setReportTemplate] = useState<'allsafe' | 'htb' | 'offsec' | 'ptes'>('allsafe')
 
   // Cargar settings de org para el PDF
@@ -162,6 +167,26 @@ export function Reportes() {
   }, [])
 
   // Cargar detalle cuando se selecciona un engagement
+  useEffect(() => { setSummary(selected?.report_summary ?? '') }, [selected])
+
+  const summaryDirty = !!selected && summary.trim() !== (selected.report_summary ?? '')
+
+  async function saveSummary() {
+    if (!selected) return
+    setSavingSummary(true)
+    try {
+      const r = await apiFetch<{ report_summary: string | null }>(`/engagements/${selected.id}/report-summary`, {
+        method: 'PUT', body: { report_summary: summary.trim() || null },
+      })
+      const actualizado = { ...selected, report_summary: r.report_summary }
+      setEngagements(es => es.map(e => (e.id === selected.id ? actualizado : e)))
+      setSelected(actualizado)
+      toast.success('Resumen guardado')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el resumen')
+    } finally { setSavingSummary(false) }
+  }
+
   useEffect(() => {
     if (!selected) { setFindings([]); setScope([]); return }
     setLoadingDetail(true)
@@ -196,6 +221,7 @@ export function Reportes() {
           start_date:  selected.start_date,
           end_date:    selected.end_date,
           notes:       selected.notes,
+          report_summary: summary.trim() || undefined,
           client_name: selected.client_name,
           lead_name:   selected.lead_name,
           scope_in:    scope.filter(s => s.in_scope).map(s => s.value),
@@ -381,6 +407,33 @@ export function Reportes() {
                     <p className='text-xs text-muted-foreground ml-4'>{t.sub}</p>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Engagement summary */}
+            <div className='rounded-xl border border-border bg-card/30 p-5 space-y-3'>
+              <div>
+                <Label htmlFor='report-summary' className='text-xs font-semibold uppercase tracking-wider text-muted-foreground'>
+                  Resumen del engagement
+                </Label>
+                <p className='text-xs text-muted-foreground mt-1'>
+                  Sale en la página del resumen ejecutivo. Lo que propone un agente llega a Agentes para aprobar.
+                </p>
+              </div>
+              <Textarea
+                id='report-summary'
+                className='min-h-32 max-h-96'
+                maxLength={15000}
+                value={summary}
+                placeholder='Estado general, riesgos principales y recomendaciones para el cliente.'
+                onChange={e => setSummary(e.target.value)}
+              />
+              <div className='flex items-center justify-end gap-2'>
+                {summaryDirty && <span className='text-xs text-muted-foreground'>Sin guardar: el PDF usa lo que está escrito.</span>}
+                <Button size='sm' variant='outline' disabled={!summaryDirty || savingSummary} onClick={saveSummary}>
+                  {savingSummary && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
+                  Guardar resumen
+                </Button>
               </div>
             </div>
 

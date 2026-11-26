@@ -420,6 +420,18 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     await tx.qRun("INSERT INTO custom_phase_updates (id,phase_id,content,created_by) VALUES (?,?,?,?)", [id, f.id, contenido, req.agente.userId]);
     return { codigo: 201, cuerpo: { actualizacion_id: id }, despues: () => anotar(req, "actualizacion", "custom_phase_updates", id, f.name) };
   }));
+
+  // ── Resumen del informe ─────────────────────────────────────────────────────
+  // Siempre es propuesta, en cualquier nivel: es lo que lee el cliente.
+  router.post("/engagements/:id/resumen", con("propuesta"), escribir(async (req, tx) => {
+    const datos = S.validarResumen(req.body);
+    const e = await tx.qRow("SELECT id, report_summary FROM engagements WHERE id=? FOR UPDATE", [req.engagement.id]);
+    const dup = await tx.qRow("SELECT id FROM agente_propuestas WHERE engagement_id=? AND key_id=? AND accion='resumen' AND estado='pendiente' LIMIT 1", [e.id, req.agente.keyId]);
+    if (dup) throw new ErrorHttp(409, "Ya propusiste un resumen y está pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
+    const id = await H.proponer(tx, { engagementId: e.id, agente: req.agente, accion: "resumen", datos, huella: S.huellaDeResumen(e) });
+    return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El resumen lo aprueba una persona en el panel, en cualquier nivel." },
+      despues: () => anotar(req, "propuesta", "agente_propuestas", id, "resumen del informe") };
+  }));
 }
 
 module.exports = { montar };

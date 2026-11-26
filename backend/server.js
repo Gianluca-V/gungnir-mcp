@@ -749,6 +749,10 @@ async function initDB() {
   try {
     await qRun(`ALTER TABLE engagements ADD COLUMN mode VARCHAR(20) NOT NULL DEFAULT 'pentesting'`);
   } catch(e) { /* columna ya existe */ }
+  // Resumen del engagement para el informe: lo escribe una persona o lo propone un agente.
+  try {
+    await qRun(`ALTER TABLE engagements ADD COLUMN report_summary TEXT NULL`);
+  } catch(e) { if (e.code !== "ER_DUP_FIELDNAME") console.error("[GUNGNIR] No se pudo agregar report_summary:", e.message); }
   try {
     await qRun(`ALTER TABLE engagements MODIFY COLUMN type VARCHAR(50) NOT NULL DEFAULT 'web_app'`);
   } catch(e) { /* ya migrado */ }
@@ -1190,7 +1194,7 @@ app.delete("/api/clientes/:id", auth(["admin"]), async (req, res) => {
 app.get("/api/engagements", auth(), async (req, res) => {
   const rows = await qRows(
     `SELECT e.id, e.title, e.codename, c.name AS client_name, e.type, e.methodology, e.status,
-       e.current_phase, e.start_date, e.end_date, e.updated_at,
+       e.current_phase, e.start_date, e.end_date, e.updated_at, e.report_summary,
        (SELECT COUNT(*) FROM findings f WHERE f.engagement_id=e.id) AS findings_count,
        (SELECT COUNT(*) FROM findings f WHERE f.engagement_id=e.id AND f.severity='critical' AND f.status='open') AS critical_count,
        u.full_name AS lead_name
@@ -1292,6 +1296,18 @@ app.put("/api/engagements/:id/phase", auth(ESCRIBEN), async (req, res) => {
   if (!eng) return res.status(404).json({ error: "No encontrado" });
   await fases.cambiarFase({ qRun }, req.params.id, phase);
   res.json({ ok: true, current_phase: phase });
+});
+
+// PUT /api/engagements/:id/report-summary - resumen del engagement que sale en el informe
+app.put("/api/engagements/:id/report-summary", auth(ESCRIBEN), async (req, res) => {
+  const v = req.body?.report_summary;
+  if (v !== null && typeof v !== "string") return res.status(400).json({ error: "El resumen tiene que ser texto" });
+  const resumen = v === null ? null : v.trim() || null;
+  if (resumen && resumen.length > 15000) return res.status(400).json({ error: "El resumen supera los 15000 caracteres" });
+  const [r] = await qRun("UPDATE engagements SET report_summary=? WHERE id=?", [resumen, req.params.id]);
+  if (!r.affectedRows) return res.status(404).json({ error: "No encontrado" });
+  await auditLog(req.user.id, req.user.username, "engagement_report_summary", "engagements", req.params.id, resumen ? `${resumen.length} caracteres` : "vaciado", req.ip);
+  res.json({ ok: true, report_summary: resumen });
 });
 
 // PUT /api/engagements/:id/phases/:phase/status - marcar fase como completed/in_progress/not_started

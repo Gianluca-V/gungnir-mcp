@@ -249,6 +249,10 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, fase_custom: faseCustom, contenido: z.string().min(1).max(15000) }, ESCRIBE,
     async ({ engagement: e, fase_custom: f, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/fases-custom/${f}/actualizaciones`, { cuerpo }))
 
+  herramienta('proponer_resumen', 'Proponer resumen', 'Propone el resumen del engagement que lee el cliente en el informe. Siempre lo aprueba una persona.',
+    { engagement, resumen: z.string().min(1).max(15000).describe('Markdown. Estado general, riesgos principales y recomendaciones') }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/resumen`, { cuerpo }))
+
   herramienta('borrar', 'Borrar', 'Borra un hallazgo, un log o una evidencia. Necesita el nivel total y no se puede deshacer.',
     { engagement, tipo: z.enum(['hallazgos', 'logs', 'evidencias']), id: z.string().uuid() }, PISA,
     async (a) => cliente.pedir('DELETE', `${await base(a.engagement)}/${a.tipo}/${a.id}`))

@@ -112,6 +112,20 @@ const TIPOS = {
       return { findingId: null };
     },
   },
+  resumen: {
+    validar: (d) => S.validarResumen(d),
+    objetivos: () => [],
+    async actual(q, p) {
+      const e = await q.qRow("SELECT report_summary FROM engagements WHERE id=?", [p.engagement_id]);
+      return e && { actual: { resumen: e.report_summary }, cambio: p.huella !== S.huellaDeResumen(e) };
+    },
+    async aplicar(tx, p, datos, { forzar }) {
+      const e = await tx.qRow("SELECT id, report_summary FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
+      if (p.huella !== S.huellaDeResumen(e) && !forzar) throw new ErrorHttp(409, "El resumen cambió después de la propuesta.", { conflicto: true });
+      await tx.qRun("UPDATE engagements SET report_summary=? WHERE id=?", [datos.resumen, e.id]);
+      return { findingId: null };
+    },
+  },
 };
 
 module.exports = { TIPOS, comoObjeto };

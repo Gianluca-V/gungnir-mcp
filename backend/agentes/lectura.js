@@ -74,7 +74,7 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
   router.get("/engagements/:id", con("lectura"), ruta(async (req, res) => {
     const e = await qRow(
       `SELECT e.id, e.title, e.codename, e.type, e.methodology, e.mode, e.status, e.current_phase, e.start_date, e.end_date,
-              e.rules_of_engagement, e.notes, c.name AS cliente
+              e.rules_of_engagement, e.notes, e.report_summary, c.name AS cliente
        FROM engagements e JOIN clients c ON c.id=e.client_id WHERE e.id=?`, [req.engagement.id]);
     const fases = await qRows("SELECT phase_type, status FROM phases WHERE engagement_id=? ORDER BY FIELD(phase_type,'planning','recon','scanning','exploitation','post_exploitation','reporting')", [e.id]);
     const sev = await qRows("SELECT severity, COUNT(*) AS n FROM findings WHERE engagement_id=? GROUP BY severity", [e.id]);

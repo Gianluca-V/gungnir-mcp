@@ -258,4 +258,43 @@ describe("secciones que escribe un agente", { skip: !URL_DB && "sin GUNGNIR_PRUE
       assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/fases-custom/${fc}/actualizaciones`, { contenido: "x" })).status, 404);
     });
   });
+
+  describe("resumen del informe", () => {
+    test("🔴 una persona lo escribe en el panel y sale en el listado y en ver_engagement", async () => {
+      const r = await persona("PUT", `/engagements/${E.a}/report-summary`, { report_summary: "Resumen de la persona" });
+      assert.equal(r.status, 200, r.texto);
+      const l = await persona("GET", "/engagements");
+      assert.equal(l.json.find((x) => x.id === E.a).report_summary, "Resumen de la persona");
+      assert.equal((await ag("lectura", "GET", `/engagements/${E.a}`)).json.datos.report_summary, "Resumen de la persona");
+      assert.equal((await persona("PUT", `/engagements/${E.a}/report-summary`, { report_summary: 5 })).status, 400);
+      assert.equal((await persona("PUT", `/engagements/${E.a}/report-summary`, { report_summary: "x".repeat(15001) })).status, 400);
+      assert.equal((await persona("PUT", `/engagements/${uid()}/report-summary`, { report_summary: "x" })).status, 404);
+    });
+    test("🔴 el agente siempre lo propone, también con escritura, y al aprobar se guarda lo corregido", async () => {
+      const r = await ag("escritura", "POST", `/engagements/${E.a}/resumen`, { resumen: "Borrador del agente" });
+      assert.equal(r.status, 202, r.texto);
+      assert.equal((await fila("SELECT report_summary FROM engagements WHERE id=?", [E.a])).report_summary, "Resumen de la persona");
+      const dup = await ag("escritura", "POST", `/engagements/${E.a}/resumen`, { resumen: "Otro" });
+      assert.equal(dup.status, 409, dup.texto);
+      const det = await persona("GET", `/agentes/propuestas/${r.json.propuesta_id}`);
+      assert.equal(det.json.actual.resumen, "Resumen de la persona");
+      const a = await aprobar(r.json.propuesta_id, { resumen: "Borrador corregido" });
+      assert.equal(a.status, 200, a.texto);
+      assert.equal((await fila("SELECT report_summary FROM engagements WHERE id=?", [E.a])).report_summary, "Borrador corregido");
+    });
+    test("🔴 si la persona lo cambió después de la propuesta, avisa antes de pisarlo", async () => {
+      const r = await ag("propuesta", "POST", `/engagements/${E.a}/resumen`, { resumen: "Borrador 2" });
+      assert.equal(r.status, 202, r.texto);
+      await persona("PUT", `/engagements/${E.a}/report-summary`, { report_summary: "Cambio de último momento" });
+      const choque = await aprobar(r.json.propuesta_id);
+      assert.equal(choque.status, 409, choque.texto);
+      assert.equal(choque.json.conflicto, true);
+      assert.equal((await fila("SELECT report_summary FROM engagements WHERE id=?", [E.a])).report_summary, "Cambio de último momento");
+    });
+    test("rechaza un resumen vacío o sin nivel", async () => {
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/resumen`, { resumen: "" })).status, 400);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/resumen`, { texto: "x" })).status, 400);
+      assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/resumen`, { resumen: "x" })).status, 403);
+    });
+  });
 });
