@@ -31,9 +31,12 @@ async function crearTablas({ qRun }) {
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 }
 
-/** Si ya hay un camino de `desde` a `hasta`: sumar hasta→desde cerraría un ciclo. */
+/**
+ * Si ya hay un camino de `desde` a `hasta`: sumar hasta→desde cerraría un ciclo. Lee con bloqueo: una lectura
+ * común vería la foto del inicio de la transacción y no la relación que otra confirmó mientras se esperaba.
+ */
 async function hayCamino(q, engagementId, desde, hasta) {
-  const links = await q.qRows("SELECT from_finding_id AS a, to_finding_id AS b FROM finding_links WHERE engagement_id=?", [engagementId]);
+  const links = await q.qRows("SELECT from_finding_id AS a, to_finding_id AS b FROM finding_links WHERE engagement_id=? LOCK IN SHARE MODE", [engagementId]);
   const salen = new Map();
   for (const { a, b } of links) salen.set(a, [...(salen.get(a) || []), b]);
   const vistos = new Set([desde]);
@@ -55,7 +58,7 @@ async function comprobar(q, engagementId, { origen, destino }) {
   const fs = await q.qRows("SELECT id, title FROM findings WHERE engagement_id=? AND id IN (?,?)", [engagementId, origen, destino]);
   const titulo = (id) => fs.find((f) => f.id === id)?.title;
   if (!titulo(origen) || !titulo(destino)) throw new ErrorHttp(404, "Algún hallazgo no existe en este engagement.");
-  if (await q.qRow("SELECT id FROM finding_links WHERE from_finding_id=? AND to_finding_id=?", [origen, destino]))
+  if (await q.qRow("SELECT id FROM finding_links WHERE from_finding_id=? AND to_finding_id=? LOCK IN SHARE MODE", [origen, destino]))
     throw new ErrorHttp(409, "Esa relación ya existe en la cadena.");
   if (await hayCamino(q, engagementId, destino, origen))
     throw new ErrorHttp(409, "La relación cerraría un ciclo: el destino ya lleva al origen en la cadena.");
@@ -66,8 +69,13 @@ async function comprobar(q, engagementId, { origen, destino }) {
 async function crear(q, engagementId, { origen, destino, relacion, nota }, { userId, keyId = null }) {
   const titulos = await comprobar(q, engagementId, { origen, destino });
   const id = uuidv4();
-  await q.qRun("INSERT INTO finding_links (id,engagement_id,from_finding_id,to_finding_id,relation,notes,created_by,agente_key_id) VALUES (?,?,?,?,?,?,?,?)",
-    [id, engagementId, origen, destino, relacion, nota ?? null, userId, keyId]);
+  try {
+    await q.qRun("INSERT INTO finding_links (id,engagement_id,from_finding_id,to_finding_id,relation,notes,created_by,agente_key_id) VALUES (?,?,?,?,?,?,?,?)",
+      [id, engagementId, origen, destino, relacion, nota ?? null, userId, keyId]);
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") throw new ErrorHttp(409, "Esa relación ya existe en la cadena.");
+    throw e;
+  }
   return { id, ...titulos };
 }
 
@@ -97,7 +105,8 @@ function montar(app, { auth, auditLog, qRow, qRows, transaccion, ESCRIBEN }) {
       nota: texto(b.notes, "notes", { max: MAX_NOTA }),
     };
     const r = await transaccion(async (tx) => {
-      if (!(await tx.qRow("SELECT id FROM engagements WHERE id=?", [req.params.id]))) throw new ErrorHttp(404, "No encontrado");
+      // Con bloqueo: una lectura común acá fijaría la foto de la transacción antes de esperar a la otra alta.
+      if (!(await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [req.params.id]))) throw new ErrorHttp(404, "No encontrado");
       return crear(tx, req.params.id, d, { userId: req.user.id });
     });
     await auditLog(req.user.id, req.user.username, "attack_chain_link", "engagements", req.params.id, `${r.origen_titulo} → ${d.relacion} → ${r.destino_titulo}`.slice(0, 2000), req.ip);

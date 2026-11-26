@@ -378,6 +378,33 @@ describe("secciones que escribe un agente", { skip: !URL_DB && "sin GUNGNIR_PRUE
       await sql("DELETE FROM findings WHERE id=?", [F.admin]);
       assert.equal((await fila("SELECT COUNT(*) AS n FROM finding_links WHERE from_finding_id=? OR to_finding_id=?", [F.admin, F.admin])).n, 0);
     });
+    describe("a la vez", () => {
+      // Dos altas cruzadas a la vez: si las dos pasan, la cadena queda con un ciclo.
+      const vuelta = async (envia) => {
+        let ciclos = 0;
+        for (let i = 0; i < 25; i++) {
+          const a = await hallazgo("a"), b = await hallazgo("a");
+          const [x, y] = await Promise.all(envia(a, b));
+          if (x.status === 201 && y.status === 201) ciclos++;
+        }
+        return ciclos;
+      };
+      test("🔴 en el panel, A→B y B→A a la vez no cierran un ciclo", async () => {
+        assert.equal(await vuelta((a, b) => [enlace({ from_finding_id: a, to_finding_id: b, relation: "enables" }), enlace({ from_finding_id: b, to_finding_id: a, relation: "enables" })]), 0);
+      });
+      test("🔴 un agente y una persona a la vez tampoco", async () => {
+        assert.equal(await vuelta((a, b) => [ag("escritura", "POST", `/engagements/${E.a}/cadena`, { origen: a, destino: b, tipo: "habilita" }),
+          enlace({ from_finding_id: b, to_finding_id: a, relation: "enables" })]), 0);
+      });
+      test("🔴 el mismo par dos veces a la vez da 201 y 409, nunca 500", async () => {
+        for (let i = 0; i < 10; i++) {
+          const a = await hallazgo("a"), b = await hallazgo("a");
+          const c = { from_finding_id: a, to_finding_id: b, relation: "enables" };
+          const rs = await Promise.all([enlace(c), enlace(c)]);
+          assert.equal(rs.map((r) => r.status).sort().join("/"), "201/409");
+        }
+      });
+    });
     test("sin nivel no relaciona, y un campo de más se rechaza", async () => {
       assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/cadena`, { origen: F.sqli, destino: F.db, tipo: "habilita" })).status, 403);
       assert.equal((await ag("escritura", "POST", `/engagements/${E.a}/cadena`, { origen: F.sqli, destino: F.db, tipo: "habilita", extra: 1 })).status, 400);
