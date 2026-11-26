@@ -240,6 +240,15 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
   herramienta('cambiar_fase', 'Cambiar fase', 'Cambia la fase activa del engagement. En el nivel propuesta queda a aprobar.', { engagement, fase }, ESCRIBE,
     async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/fase`, { cuerpo }))
 
+  const faseCustom = z.string().uuid().describe('Id de la fase custom (ver_engagement las lista)')
+  herramienta('modificar_fase_custom', 'Modificar fase custom', 'Reemplaza el plan de trabajo o cambia el estado de una fase custom. En el nivel propuesta queda a aprobar.',
+    { engagement, fase_custom: faseCustom, plan: z.string().min(1).max(15000).optional(), estado: z.enum(['not_started', 'in_progress', 'completed']).optional() }, PISA,
+    async ({ engagement: e, fase_custom: f, ...cuerpo }) => cliente.pedir('PUT', `${await base(e)}/fases-custom/${f}`, { cuerpo }))
+
+  herramienta('publicar_actualizacion', 'Publicar actualización', 'Publica un avance en una fase custom, como un log.',
+    { engagement, fase_custom: faseCustom, contenido: z.string().min(1).max(15000) }, ESCRIBE,
+    async ({ engagement: e, fase_custom: f, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/fases-custom/${f}/actualizaciones`, { cuerpo }))
+
   herramienta('borrar', 'Borrar', 'Borra un hallazgo, un log o una evidencia. Necesita el nivel total y no se puede deshacer.',
     { engagement, tipo: z.enum(['hallazgos', 'logs', 'evidencias']), id: z.string().uuid() }, PISA,
     async (a) => cliente.pedir('DELETE', `${await base(a.engagement)}/${a.tipo}/${a.id}`))

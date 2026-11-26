@@ -51,4 +51,35 @@ function validarFase(b) {
   return { fase: opcion(b.fase, "fase", FASES, { obligatorio: true }) };
 }
 
-module.exports = { FASES, ESTADOS_FASE, MAX_TEXTO, validarTiempo, validarFase, huellaDeTexto: (...v) => crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex") };
+/**
+ * Plan o estado de una fase custom. Al aprobar, la fase sale de lo propuesto (`fijo`): la persona
+ * corrige el contenido, no a qué fase se aplica.
+ */
+function validarFaseCustom(b, fijo = null) {
+  exigirCampos(b, ["plan", "estado", ...(fijo ? ["fase_id", "fase_nombre"] : [])], "del cambio de la fase");
+  const d = {};
+  const plan = texto(b.plan, "plan", { max: MAX_TEXTO });
+  const estado = opcion(b.estado, "estado", ESTADOS_FASE);
+  if (plan !== null) d.plan = plan;
+  if (estado !== null) d.estado = estado;
+  if (!Object.keys(d).length) throw new ErrorHttp(400, `Indicá "plan", "estado" o los dos.`);
+  H.exigirSinMarcas(d);
+  return fijo ? { fase_id: fijo.fase_id, fase_nombre: fijo.fase_nombre, ...d } : d;
+}
+
+const huellaDeFase = (f) => crypto.createHash("sha256").update(JSON.stringify([f.work_plan ?? null, f.status ?? null])).digest("hex");
+
+async function aplicarFaseCustom(tx, faseId, d) {
+  await tx.qRun("UPDATE custom_phases SET work_plan=COALESCE(?,work_plan), status=COALESCE(?,status) WHERE id=?", [d.plan ?? null, d.estado ?? null, faseId]);
+}
+
+function validarActualizacion(b) {
+  exigirCampos(b, ["contenido"], "de la actualización");
+  const contenido = texto(b.contenido, "contenido", { max: MAX_TEXTO, obligatorio: true });
+  H.exigirSinMarcas(contenido);
+  return contenido;
+}
+
+module.exports = {
+  FASES, ESTADOS_FASE, MAX_TEXTO, validarTiempo, validarFase, validarFaseCustom, huellaDeFase, aplicarFaseCustom, validarActualizacion,
+};

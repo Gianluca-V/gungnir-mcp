@@ -390,6 +390,36 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     await cambiarFase(tx, e.id, datos.fase);
     return { codigo: 200, cuerpo: { fase: datos.fase }, despues: () => anotar(req, "fase", "engagements", e.id, datos.fase) };
   }));
+
+  // ── Fases del modo custom ───────────────────────────────────────────────────
+  const faseCustom = async (tx, req) => {
+    const f = await tx.qRow("SELECT id, name, work_plan, status FROM custom_phases WHERE id=? AND engagement_id=? FOR UPDATE", [req.params.fid, req.engagement.id]);
+    if (!f) throw new ErrorHttp(404, "La fase custom no existe en este engagement.");
+    return f;
+  };
+
+  router.put("/engagements/:id/fases-custom/:fid", con("propuesta"), escribir(async (req, tx) => {
+    const cambio = S.validarFaseCustom(req.body);
+    const f = await faseCustom(tx, req);
+    if (!N.alcanza(req.engagement.nivel, "escritura")) {
+      const dup = await tx.qRow("SELECT id FROM agente_propuestas WHERE engagement_id=? AND key_id=? AND accion='fase_custom' AND estado='pendiente' AND JSON_UNQUOTE(JSON_EXTRACT(datos,'$.fase_id'))=? LIMIT 1", [req.engagement.id, req.agente.keyId, f.id]);
+      if (dup) throw new ErrorHttp(409, "Ya propusiste un cambio en esa fase y está pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
+      const datos = { fase_id: f.id, fase_nombre: f.name, ...cambio };
+      const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "fase_custom", datos, huella: S.huellaDeFase(f) });
+      return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El cambio queda a la espera de aprobación." },
+        despues: () => anotar(req, "propuesta", "agente_propuestas", id, `fase custom ${f.name}`) };
+    }
+    await S.aplicarFaseCustom(tx, f.id, cambio);
+    return { codigo: 200, cuerpo: { fase_id: f.id, campos: Object.keys(cambio) }, despues: () => anotar(req, "fase_custom", "custom_phases", f.id, Object.keys(cambio).join(", ")) };
+  }));
+
+  router.post("/engagements/:id/fases-custom/:fid/actualizaciones", con("propuesta"), escribir(async (req, tx) => {
+    const contenido = S.validarActualizacion(req.body);
+    const f = await faseCustom(tx, req);
+    const id = uuidv4();
+    await tx.qRun("INSERT INTO custom_phase_updates (id,phase_id,content,created_by) VALUES (?,?,?,?)", [id, f.id, contenido, req.agente.userId]);
+    return { codigo: 201, cuerpo: { actualizacion_id: id }, despues: () => anotar(req, "actualizacion", "custom_phase_updates", id, f.name) };
+  }));
 }
 
 module.exports = { montar };

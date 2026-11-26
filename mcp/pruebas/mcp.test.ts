@@ -157,9 +157,9 @@ describe('servidor MCP', () => {
   test('ofrece las herramientas, marca las que borran o pisan y no ejecuta nada por defecto', async () => {
     const { c } = await armar(() => ({}))
     const t = (await c.listTools()).tools
-    assert.equal(t.length, 23)
+    assert.equal(t.length, 25)
     assert.ok(!t.some((x) => x.name === 'ejecutar_herramienta'))
-    assert.deepEqual(t.filter((x) => x.annotations?.destructiveHint).map((x) => x.name).sort(), ['borrar', 'marcar_metodologia', 'modificar_hallazgo'])
+    assert.deepEqual(t.filter((x) => x.annotations?.destructiveHint).map((x) => x.name).sort(), ['borrar', 'marcar_metodologia', 'modificar_fase_custom', 'modificar_hallazgo'])
     for (const x of t) assert.ok(x.description && x.annotations?.readOnlyHint !== undefined, x.name)
   })
   test('🔴 ninguna herramienta cambia alcance, keys, niveles ni aprobaciones', async () => {
@@ -239,6 +239,7 @@ describe('servidor MCP', () => {
       ['marcar_metodologia', { item: 'WSTG-INFO-01', estado: 'tested' }, 'PUT /metodologia/WSTG-INFO-01'], ['registrar_tecnica', { nombre: 'x' }, 'POST /tecnicas'],
       ['borrar', { tipo: 'logs', id: E2 }, `DELETE /logs/${E2}`], ['ver_mapa', { completo: true }, 'GET /mapa'], ['registrar_mapa', { equipos: [{ objetivo: 'a', puertos: [{ puerto: 22 }] }] }, 'POST /mapa'], ['proponer_retest', { id: E2, resultado: 'passed', notas: 'x' }, `POST /hallazgos/${E2}/retest`],
       ['registrar_tiempo', { minutos: 30, fase: 'recon' }, 'POST /tiempo'], ['cambiar_fase', { fase: 'recon' }, 'POST /fase'],
+      ['modificar_fase_custom', { fase_custom: E2, plan: 'x' }, `PUT /fases-custom/${E2}`], ['publicar_actualizacion', { fase_custom: E2, contenido: 'x' }, `POST /fases-custom/${E2}/actualizaciones`],
     ]
     for (const [n, a, e] of casos) {
       const r = await x.llamar(n, a as Record<string, unknown>); assert.ok(!r.error, r.texto)

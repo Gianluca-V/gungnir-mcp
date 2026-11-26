@@ -199,4 +199,63 @@ describe("secciones que escribe un agente", { skip: !URL_DB && "sin GUNGNIR_PRUE
       assert.equal((await persona("PUT", `/engagements/${E.otro}/phase`, { phase: "lateral" })).status, 400);
     });
   });
+
+  describe("fases custom", () => {
+    let fc;
+    before(async () => {
+      fc = uid();
+      await sql("INSERT INTO custom_phases (id,engagement_id,name,description,work_plan,order_index) VALUES (?,?,?,?,?,?)", [fc, E.custom, "Revisión de código", "Repositorio principal", "Plan de la persona", 0]);
+    });
+    test("🔴 ver_engagement lista las fases custom con su plan y su estado", async () => {
+      const r = await ag("lectura", "GET", `/engagements/${E.custom}`);
+      assert.equal(r.status, 200, r.texto);
+      const f = r.json.datos.fases_custom.find((x) => x.id === fc);
+      assert.deepEqual(f, { id: fc, nombre: "Revisión de código", descripcion: "Repositorio principal", estado: "not_started", plan: "Plan de la persona" });
+      assert.equal((await ag("lectura", "GET", `/engagements/${E.a}`)).json.datos.fases_custom, undefined);
+    });
+    test("🔴 con escritura cambia el plan y el estado", async () => {
+      const r = await ag("escritura", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { plan: "1. Dependencias\n2. Secretos", estado: "in_progress" });
+      assert.equal(r.status, 200, r.texto);
+      const f = await fila("SELECT work_plan, status FROM custom_phases WHERE id=?", [fc]);
+      assert.deepEqual({ ...f }, { work_plan: "1. Dependencias\n2. Secretos", status: "in_progress" });
+      const solo = await ag("escritura", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { estado: "completed" });
+      assert.equal(solo.status, 200, solo.texto);
+      assert.equal((await fila("SELECT work_plan FROM custom_phases WHERE id=?", [fc])).work_plan, "1. Dependencias\n2. Secretos");
+    });
+    test("🔴 rechaza un pedido vacío, un estado raro y una fase de otro engagement", async () => {
+      assert.equal((await ag("escritura", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, {})).status, 400);
+      assert.equal((await ag("escritura", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { estado: "pausada" })).status, 400);
+      assert.equal((await ag("escritura", "PUT", `/engagements/${E.a}/fases-custom/${fc}`, { estado: "completed" })).status, 404);
+      assert.equal((await ag("lectura", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { estado: "completed" })).status, 403);
+    });
+    test("🔴 en el nivel propuesta queda a aprobar; si la persona cambió el plan, avisa", async () => {
+      const r = await ag("propuesta", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { plan: "Plan del agente" });
+      assert.equal(r.status, 202, r.texto);
+      assert.equal((await fila("SELECT work_plan FROM custom_phases WHERE id=?", [fc])).work_plan, "1. Dependencias\n2. Secretos");
+      const dup = await ag("propuesta", "PUT", `/engagements/${E.custom}/fases-custom/${fc}`, { estado: "completed" });
+      assert.equal(dup.status, 409, dup.texto);
+      const det = await persona("GET", `/agentes/propuestas/${r.json.propuesta_id}`);
+      assert.equal(det.json.actual.plan, "1. Dependencias\n2. Secretos");
+      assert.equal(det.json.datos.fase_nombre, "Revisión de código");
+      assert.equal(det.json.cambio, false);
+
+      await persona("PUT", `/engagements/${E.custom}/custom-phases/${fc}`, { work_plan: "Lo reescribió la persona" });
+      const choque = await aprobar(r.json.propuesta_id);
+      assert.equal(choque.status, 409, choque.texto);
+      assert.equal(choque.json.conflicto, true);
+      const forzada = await persona("POST", `/agentes/propuestas/${r.json.propuesta_id}/aprobar`, { forzar: true, datos: { plan: "Plan corregido" } });
+      assert.equal(forzada.status, 200, forzada.texto);
+      assert.equal((await fila("SELECT work_plan FROM custom_phases WHERE id=?", [fc])).work_plan, "Plan corregido");
+    });
+    test("🔴 las actualizaciones son registro: se publican desde el nivel propuesta y el panel las muestra", async () => {
+      const r = await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${fc}/actualizaciones`, { contenido: "Se revisaron 40 dependencias." });
+      assert.equal(r.status, 201, r.texto);
+      const p = await persona("GET", `/engagements/${E.custom}/custom-phases/${fc}/updates`);
+      assert.equal(p.json[0].content, "Se revisaron 40 dependencias.");
+      assert.equal(p.json[0].created_by, U.pentester.id);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${fc}/actualizaciones`, { contenido: " " })).status, 400);
+      assert.equal((await ag("lectura", "POST", `/engagements/${E.custom}/fases-custom/${fc}/actualizaciones`, { contenido: "x" })).status, 403);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/fases-custom/${fc}/actualizaciones`, { contenido: "x" })).status, 404);
+    });
+  });
 });

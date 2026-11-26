@@ -97,6 +97,21 @@ const TIPOS = {
       return { findingId: null };
     },
   },
+  fase_custom: {
+    validar: (d, propuesto) => S.validarFaseCustom(d, propuesto),
+    objetivos: () => [],
+    async actual(q, p, datos) {
+      const f = await q.qRow("SELECT name, work_plan, status FROM custom_phases WHERE id=? AND engagement_id=?", [datos.fase_id, p.engagement_id]);
+      return f && { actual: { plan: f.work_plan, estado: f.status }, cambio: p.huella !== S.huellaDeFase(f), titulo: f.name };
+    },
+    async aplicar(tx, p, datos, { forzar }) {
+      const f = await tx.qRow("SELECT id, work_plan, status FROM custom_phases WHERE id=? AND engagement_id=? FOR UPDATE", [datos.fase_id, p.engagement_id]);
+      if (!f) throw new ErrorHttp(409, "La fase que se quería modificar ya no existe.");
+      if (p.huella !== S.huellaDeFase(f) && !forzar) throw new ErrorHttp(409, "La fase cambió después de la propuesta.", { conflicto: true });
+      await S.aplicarFaseCustom(tx, f.id, datos);
+      return { findingId: null };
+    },
+  },
 };
 
 module.exports = { TIPOS, comoObjeto };

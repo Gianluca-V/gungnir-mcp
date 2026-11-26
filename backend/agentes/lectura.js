@@ -79,8 +79,11 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
     const fases = await qRows("SELECT phase_type, status FROM phases WHERE engagement_id=? ORDER BY FIELD(phase_type,'planning','recon','scanning','exploitation','post_exploitation','reporting')", [e.id]);
     const sev = await qRows("SELECT severity, COUNT(*) AS n FROM findings WHERE engagement_id=? GROUP BY severity", [e.id]);
     const alcance = await qRow("SELECT SUM(in_scope=1) AS dentro, SUM(in_scope=0) AS fuera FROM scope_items WHERE engagement_id=?", [e.id]);
+    const custom = e.mode !== "custom" ? null : (await qRows(
+      "SELECT id, name, description, status, work_plan FROM custom_phases WHERE engagement_id=? ORDER BY order_index, created_at, id", [e.id]))
+      .map((f) => ({ id: f.id, nombre: f.name, descripcion: recortar(f.description, LARGO_LISTA), estado: f.status, plan: recortar(f.work_plan, LARGO_CAMPO) }));
     entregar(req, res, {
-      ...e, fases, hallazgos_por_severidad: Object.fromEntries(sev.map((s) => [s.severity, Number(s.n)])),
+      ...e, fases, ...(custom ? { fases_custom: custom } : {}), hallazgos_por_severidad: Object.fromEntries(sev.map((s) => [s.severity, Number(s.n)])),
       alcance: { dentro: Number(alcance?.dentro || 0), fuera: Number(alcance?.fuera || 0) },
     }, { nivel_efectivo: req.engagement.nivel, max: 12000 });
   }));
