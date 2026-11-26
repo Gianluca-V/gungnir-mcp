@@ -6,7 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 ## [Sin publicar] - fork con agentes por MCP
 
 ### Agregado
-- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 21 herramientas y prompts por fase.
+- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 28 herramientas y prompts por fase.
 - API para agentes en `/api/agente/v1`, con keys propias, límite de pedidos por key, reintentos seguros y auditoría. Las API keys anteriores no cambian.
 - Niveles de autonomía por key y por engagement. Los engagements existentes quedan sin acceso.
 - Propuestas de hallazgos que aprueba una persona, y registro de acciones fuera de alcance.
@@ -20,13 +20,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Attack Map: los agentes lo consultan y suman o proponen equipos, puertos y pivotes, sin pisar lo cargado por personas.
 - `consultar_cve` suma KEV, EPSS y prioridad.
 - Agentes y personas pueden editar el Attack Map a la vez: cada uno conserva lo suyo y los choques de la base se reintentan.
+- Cadena de ataque: relaciones entre hallazgos (habilita, escala, pivota) sin ciclos, con un grafo en el workspace y una sección en el PDF. Los agentes la leen y la proponen o la cargan.
+- Resumen del engagement para el informe: se edita en Reportes, sale en el PDF y un agente lo propone.
+- Los agentes cargan tiempo, cambian la fase activa y escriben el plan, el estado y los avances de las fases custom.
 
 ### Corregido
 - Docker: el volumen de evidencias se monta donde el backend las guarda. Quien ya tenga una instalación tiene que copiar `/uploads` antes de recrear el contenedor.
 
 ### Cambiado
 - El límite general de pedidos ya no cuenta los de `/api/agente/v1`, que tienen el suyo.
-- La base suma tablas `agente_*` y dos columnas en `operation_logs`.
+- La base suma tablas `agente_*`, `finding_links`, dos columnas en `operation_logs` y `report_summary` en `engagements`.
 
 ## [1.5.2] - 2026-11-19
 

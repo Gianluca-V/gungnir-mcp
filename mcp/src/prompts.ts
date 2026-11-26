@@ -19,7 +19,8 @@ export const PROMPTS: PromptDeFase[] = [
 1. ver_engagement: leé las reglas, las fechas y el nivel que tenés.
 2. ver_alcance: separá lo que está dentro de lo excluido y señalá lo ambiguo.
 3. ver_metodologia con estado "pending": elegí por dónde empezar.
-Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resolver una persona antes de arrancar.`),
+Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resolver una persona antes de arrancar.
+Si el engagement es custom, modificar_fase_custom con el plan de cada fase. Al terminar una fase, cambiar_fase.`),
   fase('reconocimiento', 'Reconocimiento', 'Superficie expuesta, sin explotar nada',
     `Relevá la superficie de los objetivos en alcance, de lo pasivo a lo activo.
 1. listar_registros (tipo "logs", fase "recon"): no repitas lo hecho.
@@ -42,13 +43,16 @@ Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resol
 1. Mové solo hacia objetivos que verificar_alcance dé por dentro.
 2. No extraigas datos reales: alcanza con demostrar el acceso.
 3. Sin persistencia. Registrá todo cambio que hagas en un equipo y cómo se revierte.
-4. registrar_mapa con lo comprometido y desde qué equipo se llegó. registrar_tecnica con su identificador MITRE ATT&CK.`),
+4. registrar_mapa con lo comprometido y desde qué equipo se llegó. registrar_tecnica con su identificador MITRE ATT&CK.
+5. relacionar_hallazgos por cada paso: qué hallazgo habilitó, escaló o pivotó al siguiente.`),
   fase('reporte', 'Reporte', 'Completar y ordenar los hallazgos',
     `Dejá los hallazgos listos para el informe.
 1. listar_registros (tipo "hallazgos") y ver_hallazgo en cada uno.
 2. Completá descripción, pasos, recomendación, CVSS y CWE. Usá consultar_cve y buscar_plantillas; ordená por su prioridad.
 3. Revisá la cobertura con ver_metodologia.
-4. Listá duplicados, hallazgos sin evidencia y propuestas pendientes. El PDF se genera desde el panel.`),
+4. Revisá la cadena con ver_cadena y completá los pasos que falten con relacionar_hallazgos.
+5. proponer_resumen con el estado general, los riesgos principales y qué corregir primero, en lenguaje para el cliente.
+6. Listá duplicados, hallazgos sin evidencia y propuestas pendientes. El PDF se genera desde el panel.`),
   fase('retest', 'Retest', 'Comprobar si lo reportado se corrigió',
     `Reprobá los hallazgos que el cliente dice haber corregido.
 1. listar_registros (tipo "hallazgos") por estado y por retest. Ordená por severidad y por vencimiento. Los de estado "accepted" no se reprueban.
