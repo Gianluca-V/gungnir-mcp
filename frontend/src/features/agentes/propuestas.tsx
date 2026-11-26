@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
+import { type TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { apiFetch } from '@/lib/api'
@@ -23,6 +24,7 @@ import {
   useResumenAgentes,
   type Propuesta,
 } from './comun'
+import { SOLO_LECTURA } from './campos'
 import { DialogoPropuesta } from './dialogo-propuesta'
 import { Equipo, equiposDe } from './mapa'
 
@@ -36,6 +38,42 @@ function texto(v: unknown): string {
   if (v === null || v === undefined) return ''
   if (Array.isArray(v)) return v.map(texto).join('\n')
   return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
+
+const SIN_ESCAPE = { interpolation: { escapeValue: false } }
+
+/** Qué propone, en una línea. Los textos pueden venir de un agente: van sin interpretar. */
+function tituloDe(p: Propuesta, equipos: number, t: TFunction): string {
+  const d = p.datos
+  switch (p.accion) {
+    case 'mapa':
+      return t('agentes.map.title', { count: equipos })
+    case 'fase':
+      return t('agentes.proposals.title_fase', {
+        fase: t(`agentes.option.fase.${texto(d.fase)}`, {
+          defaultValue: texto(d.fase),
+        }),
+        ...SIN_ESCAPE,
+      })
+    case 'fase_custom':
+      return t('agentes.proposals.title_fase_custom', {
+        nombre: texto(d.fase_nombre),
+        ...SIN_ESCAPE,
+      })
+    case 'resumen':
+      return t('agentes.proposals.title_resumen')
+    case 'cadena':
+      return t('agentes.proposals.title_cadena', {
+        origen: texto(d.origen_titulo),
+        destino: texto(d.destino_titulo),
+        tipo: t(`agentes.option.tipo.${texto(d.tipo)}`, {
+          defaultValue: texto(d.tipo),
+        }),
+        ...SIN_ESCAPE,
+      })
+    default:
+      return texto(d.title) || p.hallazgo_actual || ''
+  }
 }
 
 export function Propuestas() {
@@ -192,10 +230,7 @@ export function Propuestas() {
         <ul className='divide-y divide-border rounded-lg border border-border'>
           {filas.map((p) => {
             const equipos = equiposDe(p.datos)
-            const titulo =
-              p.accion === 'mapa'
-                ? t('agentes.map.title', { count: equipos.length })
-                : texto(p.datos.title) || p.hallazgo_actual || ''
+            const titulo = tituloDe(p, equipos.length, t)
             const sev = p.datos.severity as Severidad | undefined
             return (
               <li key={p.id} className='flex gap-3 p-4'>
@@ -307,7 +342,7 @@ export function Propuestas() {
                               'resultado',
                               'objetivo',
                               'equipos',
-                            ].includes(k)
+                            ].includes(k) && !SOLO_LECTURA.has(k)
                         )
                         .map(([k, v]) => (
                           <div key={k}>

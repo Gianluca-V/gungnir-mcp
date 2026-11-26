@@ -2220,7 +2220,13 @@
         "mapa": "Registrar en el mapa",
         "metodologia": "Marcar metodología",
         "tecnica": "Registrar técnica",
-        "otra": "Pedido desconocido"
+        "otra": "Pedido desconocido",
+        "tiempo": "Registrar tiempo",
+        "fase": "Cambiar fase",
+        "fase_custom": "Modificar fase custom",
+        "actualizacion": "Publicar actualización",
+        "resumen": "Proponer resumen",
+        "cadena": "Relacionar hallazgos"
       }
     },
     "edit": {
@@ -2244,7 +2250,11 @@
       "count_one": "{{count}} campo editado",
       "count_other": "{{count}} campos editados",
       "no_changes": "Sin cambios sobre lo propuesto",
-      "approve_edited": "Aprobar con cambios"
+      "approve_edited": "Aprobar con cambios",
+      "desc_fase": "El agente propone cambiar la fase activa del engagement. Podés elegir otra antes de aprobar.",
+      "desc_fase_custom": "El plan de trabajo o el estado que propone el agente, junto a lo que hay hoy. Sacá lo que no quieras aplicar.",
+      "desc_resumen": "El borrador del resumen que lee el cliente en el informe, junto al actual. Corregilo antes de aprobar.",
+      "desc_cadena": "Una relación entre dos hallazgos de la cadena de ataque. Podés cambiar el tipo y la nota."
     },
     "field": {
       "title": "Título",
@@ -2273,7 +2283,13 @@
       "resultado": "Resultado",
       "objetivo": "Objetivo probado",
       "retest_severity": "Severidad que queda",
-      "notas": "Qué se probó y qué se observó"
+      "notas": "Qué se probó y qué se observó",
+      "fase": "Fase",
+      "plan": "Plan de trabajo",
+      "estado": "Estado",
+      "resumen": "Resumen del engagement",
+      "tipo": "Relación",
+      "nota": "Nota"
     },
     "option": {
       "resultado": {
@@ -2319,6 +2335,24 @@
         "exploitation": "Explotación",
         "post_exploitation": "Post-explotación",
         "reporting": "Reporte"
+      },
+      "fase": {
+        "planning": "Planificación",
+        "recon": "Reconocimiento",
+        "scanning": "Escaneo",
+        "exploitation": "Explotación",
+        "post_exploitation": "Post-explotación",
+        "reporting": "Reporte"
+      },
+      "estado": {
+        "not_started": "Sin empezar",
+        "in_progress": "En curso",
+        "completed": "Terminada"
+      },
+      "tipo": {
+        "habilita": "Habilita",
+        "escala": "Escala a",
+        "pivota": "Pivota a"
       }
     },
     "map": {
@@ -2447,7 +2481,15 @@
       "reject_title": "Rechazar propuesta",
       "reject_reason": "Motivo (lo ve el agente)",
       "details": "Ver detalle",
-      "target": "Sobre \"{{title}}\""
+      "target": "Sobre \"{{title}}\"",
+      "kind_fase": "Fase activa",
+      "kind_fase_custom": "Fase custom",
+      "kind_resumen": "Resumen del informe",
+      "kind_cadena": "Cadena de ataque",
+      "title_fase": "Pasar a {{fase}}",
+      "title_fase_custom": "Plan o estado de «{{nombre}}»",
+      "title_resumen": "Resumen del engagement para el informe",
+      "title_cadena": "{{origen}} → {{tipo}} → {{destino}}"
     },
     "violations": {
       "empty": "Ninguna acción fuera de alcance por revisar.",

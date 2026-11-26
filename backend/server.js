@@ -30,6 +30,7 @@ const inventarioCommunity = require("./inventario-community");
 const vulnerabilidades    = require("./vulnerabilidades");
 const agentes             = require("./agentes");
 const retest = require("./retest");
+const fases = require("./fases");
 const { reintentando } = require("./agentes/comun");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
@@ -1289,17 +1290,7 @@ app.put("/api/engagements/:id/phase", auth(ESCRIBEN), async (req, res) => {
   if (!PHASES_ORDER.includes(phase)) return res.status(400).json({ error: "Fase inválida" });
   const eng = await qRow("SELECT id FROM engagements WHERE id=?", [req.params.id]);
   if (!eng) return res.status(404).json({ error: "No encontrado" });
-
-  // Solo pasar a 'in_progress' si el engagement aún no fue entregado/archivado
-  await qRun(
-    "UPDATE engagements SET current_phase=?, status=IF(status IN ('planned'), 'in_progress', status) WHERE id=?",
-    [phase, req.params.id]
-  );
-  // Solo marcar la fase como 'in_progress' si NO estaba ya completada
-  await qRun(
-    "UPDATE phases SET status=IF(status='completed', 'completed', 'in_progress'), started_at=COALESCE(started_at, NOW()) WHERE engagement_id=? AND phase_type=?",
-    [req.params.id, phase]
-  );
+  await fases.cambiarFase({ qRun }, req.params.id, phase);
   res.json({ ok: true, current_phase: phase });
 });
 

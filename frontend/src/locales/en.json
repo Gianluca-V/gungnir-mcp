@@ -2220,7 +2220,13 @@
         "mapa": "Record on the map",
         "metodologia": "Mark methodology",
         "tecnica": "Record technique",
-        "otra": "Unknown request"
+        "otra": "Unknown request",
+        "tiempo": "Record time",
+        "fase": "Change phase",
+        "fase_custom": "Change custom phase",
+        "actualizacion": "Post update",
+        "resumen": "Propose summary",
+        "cadena": "Link findings"
       }
     },
     "edit": {
@@ -2244,7 +2250,11 @@
       "count_one": "{{count}} edited field",
       "count_other": "{{count}} edited fields",
       "no_changes": "No changes to the proposal",
-      "approve_edited": "Approve with changes"
+      "approve_edited": "Approve with changes",
+      "desc_fase": "The agent proposes changing the engagement's active phase. You can pick another one before approving.",
+      "desc_fase_custom": "The work plan or status the agent proposes, next to what there is today. Remove what you do not want to apply.",
+      "desc_resumen": "The draft summary the client reads in the report, next to the current one. Correct it before approving.",
+      "desc_cadena": "A link between two findings in the attack chain. You can change the type and the note."
     },
     "field": {
       "title": "Title",
@@ -2273,7 +2283,13 @@
       "resultado": "Result",
       "objetivo": "Target tested",
       "retest_severity": "Remaining severity",
-      "notas": "What was tested and observed"
+      "notas": "What was tested and observed",
+      "fase": "Phase",
+      "plan": "Work plan",
+      "estado": "Status",
+      "resumen": "Engagement summary",
+      "tipo": "Relation",
+      "nota": "Note"
     },
     "option": {
       "resultado": {
@@ -2319,6 +2335,24 @@
         "exploitation": "Exploitation",
         "post_exploitation": "Post-exploitation",
         "reporting": "Reporting"
+      },
+      "fase": {
+        "planning": "Planning",
+        "recon": "Reconnaissance",
+        "scanning": "Scanning",
+        "exploitation": "Exploitation",
+        "post_exploitation": "Post-exploitation",
+        "reporting": "Reporting"
+      },
+      "estado": {
+        "not_started": "Not started",
+        "in_progress": "In progress",
+        "completed": "Completed"
+      },
+      "tipo": {
+        "habilita": "Enables",
+        "escala": "Escalates to",
+        "pivota": "Pivots to"
       }
     },
     "map": {
@@ -2447,7 +2481,15 @@
       "reject_title": "Reject proposal",
       "reject_reason": "Reason (the agent sees it)",
       "details": "View details",
-      "target": "On \"{{title}}\""
+      "target": "On \"{{title}}\"",
+      "kind_fase": "Active phase",
+      "kind_fase_custom": "Custom phase",
+      "kind_resumen": "Report summary",
+      "kind_cadena": "Attack chain",
+      "title_fase": "Move to {{fase}}",
+      "title_fase_custom": "Plan or status of “{{nombre}}”",
+      "title_resumen": "Engagement summary for the report",
+      "title_cadena": "{{origen}} → {{tipo}} → {{destino}}"
     },
     "violations": {
       "empty": "No out-of-scope actions to review.",

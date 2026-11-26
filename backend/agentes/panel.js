@@ -244,7 +244,8 @@ function montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificar
       const propuesto = comoObjeto(p.datos);
       const tipo = TIPOS[p.accion];
       if (tipo.antes) await tipo.antes(tx, p);
-      const datos = editados === undefined ? propuesto : tipo.validar(editados);
+      // Lo que identifica a qué se aplica (una fase, dos hallazgos) sale de lo propuesto: la persona corrige el contenido.
+      const datos = editados === undefined ? propuesto : tipo.validar(editados, propuesto);
       const campos = camposEditados(propuesto, datos);
       const objetivos = tipo.objetivos(datos);
       if (objetivos.length) {

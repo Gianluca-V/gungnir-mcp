@@ -230,6 +230,16 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, nombre: z.string().min(1).max(200), mitre_id: z.string().max(20).optional(), tactica: z.string().max(100).optional(), herramienta: z.string().max(200).optional(), fase: fase.optional(), notas: z.string().max(5000).optional() }, ESCRIBE,
     async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/tecnicas`, { cuerpo }))
 
+  herramienta('registrar_tiempo', 'Registrar tiempo', 'Carga tiempo trabajado, en una fase o en una fase custom. Necesita nivel escritura.',
+    {
+      engagement, minutos: z.number().int().min(1).max(1440), fase: fase.optional(), fase_custom: z.string().uuid().optional().describe('Id de una fase custom; no va con "fase"'),
+      nota: z.string().max(500).optional(), fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Por defecto, hoy. No puede ser futura'),
+    }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/tiempo`, { cuerpo }))
+
+  herramienta('cambiar_fase', 'Cambiar fase', 'Cambia la fase activa del engagement. En el nivel propuesta queda a aprobar.', { engagement, fase }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/fase`, { cuerpo }))
+
   herramienta('borrar', 'Borrar', 'Borra un hallazgo, un log o una evidencia. Necesita el nivel total y no se puede deshacer.',
     { engagement, tipo: z.enum(['hallazgos', 'logs', 'evidencias']), id: z.string().uuid() }, PISA,
     async (a) => cliente.pedir('DELETE', `${await base(a.engagement)}/${a.tipo}/${a.id}`))

@@ -27,6 +27,7 @@ import {
   CAMPOS,
   CAMPOS_ALTA,
   CAMPOS_RETEST,
+  CAMPOS_SECCION,
   comoTexto,
   errorDe,
   VACIABLES,
@@ -94,14 +95,21 @@ function Formulario({
 }: Props & { detalle: DetallePropuesta }) {
   const { t } = useTranslation()
   const alta = detalle.accion === 'crear'
-  const seSacan = detalle.accion === 'actualizar'
+  // En una fase custom cada dato es opcional: se puede aprobar solo el plan o solo el estado.
+  const seSacan =
+    detalle.accion === 'actualizar' || detalle.accion === 'fase_custom'
+  const seccion = CAMPOS_SECCION[detalle.accion]
   const posibles =
     detalle.accion === 'retest'
       ? CAMPOS_RETEST
-      : CAMPOS.filter(
-          (c) =>
-            c.nombre in detalle.datos || (alta && CAMPOS_ALTA.has(c.nombre))
-        )
+      : seccion
+        ? seccion.filter(
+            (c) => !seSacan || c.nombre in detalle.datos || c.obligatorio
+          )
+        : CAMPOS.filter(
+            (c) =>
+              c.nombre in detalle.datos || (alta && CAMPOS_ALTA.has(c.nombre))
+          )
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       posibles.map((c) => [c.nombre, comoTexto(detalle.datos[c.nombre])])

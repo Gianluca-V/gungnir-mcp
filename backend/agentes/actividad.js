@@ -26,6 +26,12 @@ const ACCIONES = [
   ["POST", /^\/engagements\/[^/]+\/mapa\/?$/i, "mapa"],
   ["PUT", /^\/engagements\/[^/]+\/metodologia\//i, "metodologia"],
   ["POST", /^\/engagements\/[^/]+\/tecnicas\/?$/i, "tecnica"],
+  ["POST", /^\/engagements\/[^/]+\/tiempo\/?$/i, "tiempo"],
+  ["POST", /^\/engagements\/[^/]+\/fase\/?$/i, "fase"],
+  ["POST", /^\/engagements\/[^/]+\/fases-custom\/[^/]+\/actualizaciones\/?$/i, "actualizacion"],
+  ["PUT", /^\/engagements\/[^/]+\/fases-custom\//i, "fase_custom"],
+  ["POST", /^\/engagements\/[^/]+\/resumen\/?$/i, "resumen"],
+  ["POST", /^\/engagements\/[^/]+\/cadena\/?$/i, "cadena"],
 ];
 function accionDe(metodo, ruta) {
   if (metodo === "GET" || metodo === "HEAD") return "consulta";

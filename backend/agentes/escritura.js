@@ -15,6 +15,8 @@ const H = require("./hallazgos");
 const importacion = require("./importacion");
 const mapa = require("./mapa");
 const retest = require("./retest");
+const S = require("./secciones");
+const { cambiarFase } = require("../fases");
 const { comoObjeto } = require("./aprobacion");
 const { evaluar, evaluador, juzgarActivo } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion, reintentando } = require("./comun");
@@ -360,6 +362,33 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     await tx.qRun("INSERT INTO engagement_techniques (id,engagement_id,phase_type,mitre_id,name,tactic,tool,notes,added_by) VALUES (?,?,?,?,?,?,?,?,?)",
       [id, req.engagement.id, d.phase_type, d.mitre_id, d.name, d.tactic, d.tool, d.notes, req.agente.userId]);
     return { codigo: 201, cuerpo: { tecnica_id: id }, despues: () => anotar(req, "tecnica", "engagement_techniques", id, d.name) };
+  }));
+
+  // ── Tiempo y fase activa ────────────────────────────────────────────────────
+  router.post("/engagements/:id/tiempo", con("escritura"), escribir(async (req, tx) => {
+    const d = S.validarTiempo(req.body);
+    if (d.fase_custom && !(await tx.qRow("SELECT id FROM custom_phases WHERE id=? AND engagement_id=?", [d.fase_custom, req.engagement.id])))
+      throw new ErrorHttp(404, "La fase custom no existe en este engagement.");
+    const id = uuidv4();
+    await tx.qRun("INSERT INTO time_entries (id,engagement_id,phase_type,custom_phase_id,user_id,minutes,note,worked_on) VALUES (?,?,?,?,?,?,?,?)",
+      [id, req.engagement.id, d.fase, d.fase_custom, req.agente.userId, d.minutos, d.nota, d.fecha]);
+    return { codigo: 201, cuerpo: { tiempo_id: id, minutos: d.minutos, fecha: d.fecha }, despues: () => anotar(req, "tiempo", "time_entries", id, `${d.minutos} min`) };
+  }));
+
+  router.post("/engagements/:id/fase", con("propuesta"), escribir(async (req, tx) => {
+    const datos = S.validarFase(req.body);
+    const e = await enFila(tx, req.engagement.id);
+    if ((await tx.qRow("SELECT current_phase FROM engagements WHERE id=?", [e.id])).current_phase === datos.fase)
+      throw new ErrorHttp(409, `"${datos.fase}" ya es la fase activa.`);
+    if (!N.alcanza(req.engagement.nivel, "escritura")) {
+      const dup = await tx.qRow("SELECT id FROM agente_propuestas WHERE engagement_id=? AND accion='fase' AND estado='pendiente' AND JSON_UNQUOTE(JSON_EXTRACT(datos,'$.fase'))=? LIMIT 1", [e.id, datos.fase]);
+      if (dup) throw new ErrorHttp(409, "Ese cambio de fase ya está pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
+      const id = await H.proponer(tx, { engagementId: e.id, agente: req.agente, accion: "fase", datos });
+      return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El cambio de fase queda a la espera de aprobación." },
+        despues: () => anotar(req, "propuesta", "agente_propuestas", id, `fase ${datos.fase}`) };
+    }
+    await cambiarFase(tx, e.id, datos.fase);
+    return { codigo: 200, cuerpo: { fase: datos.fase }, despues: () => anotar(req, "fase", "engagements", e.id, datos.fase) };
   }));
 }
 

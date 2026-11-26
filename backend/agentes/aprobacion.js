@@ -11,7 +11,9 @@
 const H = require("./hallazgos");
 const mapa = require("./mapa");
 const retest = require("./retest");
+const S = require("./secciones");
 const R = require("../retest");
+const { cambiarFase } = require("../fases");
 const { ErrorHttp } = require("./comun");
 
 const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
@@ -80,6 +82,19 @@ const TIPOS = {
     actual: async (q, p, datos) => ({ actual: { origenes: await mapa.origenesDe(q, p.engagement_id, datos) } }),
     async aplicar(tx, p, datos) {
       return { findingId: null, resultado: await mapa.aplicar(tx, p.engagement_id, datos) };
+    },
+  },
+  fase: {
+    validar: (d) => S.validarFase(d),
+    objetivos: () => [],
+    async actual(q, p) {
+      const e = await q.qRow("SELECT current_phase FROM engagements WHERE id=?", [p.engagement_id]);
+      return { actual: { fase: e?.current_phase ?? null } };
+    },
+    async aplicar(tx, p, datos) {
+      await tx.qRow("SELECT id FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
+      await cambiarFase(tx, p.engagement_id, datos.fase);
+      return { findingId: null };
     },
   },
 };

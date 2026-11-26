@@ -67,8 +67,41 @@ export const CAMPOS_RETEST: Campo[] = [
   largo('notas', 20_000, true),
 ]
 
+const FASES = [
+  'planning',
+  'recon',
+  'scanning',
+  'exploitation',
+  'post_exploitation',
+  'reporting',
+]
+
+/** Lo que se propone en el resto de las secciones, por tipo de propuesta. */
+export const CAMPOS_SECCION: Record<string, Campo[]> = {
+  fase: [{ ...opcion('fase', ...FASES), obligatorio: true }],
+  fase_custom: [
+    largo('plan', 15_000),
+    opcion('estado', 'not_started', 'in_progress', 'completed'),
+  ],
+  resumen: [largo('resumen', 15_000, true)],
+  cadena: [
+    { ...opcion('tipo', 'habilita', 'escala', 'pivota'), obligatorio: true },
+    largo('nota', 5_000),
+  ],
+}
+
+/** Datos que pone Gungnir para mostrar la propuesta: no se editan. */
+export const SOLO_LECTURA = new Set([
+  'fase_id',
+  'fase_nombre',
+  'origen',
+  'destino',
+  'origen_titulo',
+  'destino_titulo',
+])
+
 /** Las opciones que se pueden dejar sin valor. */
-export const VACIABLES = new Set(['phase_type', 'retest_severity'])
+export const VACIABLES = new Set(['phase_type', 'retest_severity', 'estado'])
 
 /** Los que se muestran siempre en un hallazgo nuevo, aunque el agente no los haya mandado. */
 export const CAMPOS_ALTA = new Set([
