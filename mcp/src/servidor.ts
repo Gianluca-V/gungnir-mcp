@@ -253,6 +253,16 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, resumen: z.string().min(1).max(15000).describe('Markdown. Estado general, riesgos principales y recomendaciones') }, ESCRIBE,
     async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/resumen`, { cuerpo }))
 
+  herramienta('relacionar_hallazgos', 'Relacionar hallazgos', 'Suma a la cadena de ataque que un hallazgo habilita, escala o pivota a otro. Sin ciclos. En el nivel propuesta queda a aprobar.',
+    {
+      engagement, origen: z.string().uuid().describe('Hallazgo que se usó primero'), destino: z.string().uuid().describe('Hallazgo al que se llegó'),
+      tipo: z.enum(['habilita', 'escala', 'pivota']), nota: z.string().max(5000).optional().describe('Cómo se pasó de uno al otro'),
+    }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/cadena`, { cuerpo }))
+
+  herramienta('ver_cadena', 'Ver cadena de ataque', 'Relaciones entre hallazgos: cuál habilita, escala o pivota a cuál.', { engagement, ...pagina }, LEE,
+    async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/cadena`, { consulta }))
+
   herramienta('borrar', 'Borrar', 'Borra un hallazgo, un log o una evidencia. Necesita el nivel total y no se puede deshacer.',
     { engagement, tipo: z.enum(['hallazgos', 'logs', 'evidencias']), id: z.string().uuid() }, PISA,
     async (a) => cliente.pedir('DELETE', `${await base(a.engagement)}/${a.tipo}/${a.id}`))

@@ -17,6 +17,7 @@ const mapa = require("./mapa");
 const retest = require("./retest");
 const S = require("./secciones");
 const { cambiarFase } = require("../fases");
+const cadena = require("../cadena");
 const { comoObjeto } = require("./aprobacion");
 const { evaluar, evaluador, juzgarActivo } = require("./alcance");
 const { ErrorHttp, ruta, texto, opcion, reintentando } = require("./comun");
@@ -431,6 +432,24 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     const id = await H.proponer(tx, { engagementId: e.id, agente: req.agente, accion: "resumen", datos, huella: S.huellaDeResumen(e) });
     return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "El resumen lo aprueba una persona en el panel, en cualquier nivel." },
       despues: () => anotar(req, "propuesta", "agente_propuestas", id, "resumen del informe") };
+  }));
+
+  // ── Cadena de ataque ────────────────────────────────────────────────────────
+  router.post("/engagements/:id/cadena", con("propuesta"), escribir(async (req, tx) => {
+    const d = S.validarRelacion(req.body);
+    const titulos = await cadena.comprobar(tx, req.engagement.id, d);
+    const resumen = `${titulos.origen_titulo} → ${d.tipo} → ${titulos.destino_titulo}`.slice(0, 2000);
+    if (!N.alcanza(req.engagement.nivel, "escritura")) {
+      const dup = await tx.qRow(
+        `SELECT id FROM agente_propuestas WHERE engagement_id=? AND accion='cadena' AND estado='pendiente'
+         AND JSON_UNQUOTE(JSON_EXTRACT(datos,'$.origen'))=? AND JSON_UNQUOTE(JSON_EXTRACT(datos,'$.destino'))=? LIMIT 1`, [req.engagement.id, d.origen, d.destino]);
+      if (dup) throw new ErrorHttp(409, "Esa relación ya está pendiente de aprobación.", { existente: { tipo: "propuesta", id: dup.id } });
+      const id = await H.proponer(tx, { engagementId: req.engagement.id, agente: req.agente, accion: "cadena", datos: { ...d, ...titulos } });
+      return { codigo: 202, cuerpo: { propuesta_id: id, estado: "pendiente", aviso: "La relación queda a la espera de aprobación." },
+        despues: () => anotar(req, "propuesta", "agente_propuestas", id, resumen) };
+    }
+    const r = await cadena.crear(tx, req.engagement.id, { ...d, relacion: S.RELACION[d.tipo] }, { userId: req.agente.userId, keyId: req.agente.keyId });
+    return { codigo: 201, cuerpo: { relacion_id: r.id }, despues: () => anotar(req, "cadena", "finding_links", r.id, resumen) };
   }));
 }
 

@@ -14,6 +14,7 @@ const retest = require("./retest");
 const S = require("./secciones");
 const R = require("../retest");
 const { cambiarFase } = require("../fases");
+const cadena = require("../cadena");
 const { ErrorHttp } = require("./comun");
 
 const comoObjeto = (v) => (typeof v === "string" ? JSON.parse(v) : v);
@@ -123,6 +124,15 @@ const TIPOS = {
       const e = await tx.qRow("SELECT id, report_summary FROM engagements WHERE id=? FOR UPDATE", [p.engagement_id]);
       if (p.huella !== S.huellaDeResumen(e) && !forzar) throw new ErrorHttp(409, "El resumen cambió después de la propuesta.", { conflicto: true });
       await tx.qRun("UPDATE engagements SET report_summary=? WHERE id=?", [datos.resumen, e.id]);
+      return { findingId: null };
+    },
+  },
+  cadena: {
+    validar: (d, propuesto) => S.validarRelacion(d, propuesto),
+    objetivos: () => [],
+    actual: async () => null,
+    async aplicar(tx, p, datos, { userId }) {
+      await cadena.crear(tx, p.engagement_id, { ...datos, relacion: S.RELACION[datos.tipo] }, { userId, keyId: p.key_id });
       return { findingId: null };
     },
   },

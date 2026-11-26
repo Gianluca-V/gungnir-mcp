@@ -297,4 +297,90 @@ describe("secciones que escribe un agente", { skip: !URL_DB && "sin GUNGNIR_PRUE
       assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/resumen`, { resumen: "x" })).status, 403);
     });
   });
+
+  describe("cadena de ataque", () => {
+    const F = {};
+    const enlace = (cuerpo) => persona("POST", `/engagements/${E.a}/attack-chain`, cuerpo);
+    before(async () => {
+      F.sqli = await hallazgo("a", { title: "SQLi en el login", severity: "critical", affected_asset: "10.10.1.1:443/tcp" });
+      F.admin = await hallazgo("a", { title: "Acceso de administrador", severity: "high" });
+      F.db = await hallazgo("a", { title: "Base de datos expuesta", severity: "high", affected_asset: "10.10.1.20" });
+      F.ajeno = await hallazgo("otro", { title: "De otro engagement" });
+      await sql("INSERT INTO engagement_techniques (id,engagement_id,phase_type,mitre_id,name) VALUES (?,?,?,?,?)", [uid(), E.a, "exploitation", "T1190", "Exploit Public-Facing Application"]);
+    });
+
+    test("🔴 una persona relaciona hallazgos y el panel devuelve hallazgos, relaciones y técnicas", async () => {
+      const r = await enlace({ from_finding_id: F.sqli, to_finding_id: F.admin, relation: "enables", notes: "La inyección da la sesión" });
+      assert.equal(r.status, 201, r.texto);
+      const g = await persona("GET", `/engagements/${E.a}/attack-chain`);
+      assert.equal(g.status, 200, g.texto);
+      assert.deepEqual(g.json.links.map((l) => [l.from_finding_id, l.to_finding_id, l.relation, l.notes]), [[F.sqli, F.admin, "enables", "La inyección da la sesión"]]);
+      assert.equal(g.json.links[0].created_by_agent, false);
+      assert.ok(g.json.findings.some((f) => f.id === F.db && f.severity === "high" && f.affected_asset === "10.10.1.20"));
+      assert.ok(!g.json.findings.some((f) => f.id === F.ajeno));
+      assert.deepEqual(g.json.techniques.map((t) => t.mitre_id), ["T1190"]);
+    });
+    test("🔴 no admite ciclos, repetidos, un hallazgo consigo mismo ni hallazgos de otro engagement", async () => {
+      const casos = [
+        [{ from_finding_id: F.admin, to_finding_id: F.sqli, relation: "enables" }, 409, /ciclo/i],
+        [{ from_finding_id: F.sqli, to_finding_id: F.admin, relation: "escalates" }, 409, /ya existe/i],
+        [{ from_finding_id: F.sqli, to_finding_id: F.sqli, relation: "enables" }, 400, /mismo/i],
+        [{ from_finding_id: F.sqli, to_finding_id: F.ajeno, relation: "enables" }, 404, /no existe/i],
+        [{ from_finding_id: F.sqli, to_finding_id: F.db, relation: "explota" }, 400, /relation/i],
+        [{ from_finding_id: F.sqli, relation: "enables" }, 400, /to_finding_id/i],
+      ];
+      for (const [cuerpo, codigo, texto] of casos) {
+        const r = await enlace(cuerpo);
+        assert.equal(r.status, codigo, `${JSON.stringify(cuerpo)}: ${r.texto}`);
+        assert.match(r.json.error, texto);
+      }
+    });
+    test("🔴 el agente con escritura relaciona y lee la cadena; un ciclo largo también se rechaza", async () => {
+      const r = await ag("escritura", "POST", `/engagements/${E.a}/cadena`, { origen: F.admin, destino: F.db, tipo: "pivota", nota: "Desde el panel de admin" });
+      assert.equal(r.status, 201, r.texto);
+      const v = await ag("lectura", "GET", `/engagements/${E.a}/cadena`);
+      assert.equal(v.status, 200, v.texto);
+      const x = v.json.datos.find((l) => l.origen === F.admin);
+      assert.deepEqual({ ...x, id: undefined }, { id: undefined, origen: F.admin, origen_titulo: "Acceso de administrador", destino: F.db, destino_titulo: "Base de datos expuesta", tipo: "pivota", nota: "Desde el panel de admin", de_agente: true });
+      const ciclo = await ag("escritura", "POST", `/engagements/${E.a}/cadena`, { origen: F.db, destino: F.sqli, tipo: "habilita" });
+      assert.equal(ciclo.status, 409, ciclo.texto);
+      const g = await persona("GET", `/engagements/${E.a}/attack-chain`);
+      assert.equal(g.json.links.find((l) => l.from_finding_id === F.admin).created_by_agent, true);
+    });
+    test("🔴 en el nivel propuesta queda a aprobar; la persona corrige el tipo, no los hallazgos", async () => {
+      const d = await hallazgo("a", { title: "Credenciales en un backup", severity: "medium" });
+      const r = await ag("propuesta", "POST", `/engagements/${E.a}/cadena`, { origen: F.db, destino: d, tipo: "habilita" });
+      assert.equal(r.status, 202, r.texto);
+      assert.equal((await fila("SELECT COUNT(*) AS n FROM finding_links WHERE from_finding_id=?", [F.db])).n, 0);
+      const dup = await ag("propuesta", "POST", `/engagements/${E.a}/cadena`, { origen: F.db, destino: d, tipo: "escala" });
+      assert.equal(dup.status, 409, dup.texto);
+      const det = await persona("GET", `/agentes/propuestas/${r.json.propuesta_id}`);
+      assert.equal(det.json.datos.origen_titulo, "Base de datos expuesta");
+      const a = await aprobar(r.json.propuesta_id, { tipo: "escala", nota: "Corregido", origen: F.sqli });
+      assert.equal(a.status, 200, a.texto);
+      const l = await fila("SELECT from_finding_id, to_finding_id, relation, notes FROM finding_links WHERE to_finding_id=?", [d]);
+      assert.deepEqual({ ...l }, { from_finding_id: F.db, to_finding_id: d, relation: "escalates", notes: "Corregido" });
+    });
+    test("🔴 si mientras tanto la relación formaría un ciclo, no se aprueba", async () => {
+      const x = await hallazgo("a", { title: "Hallazgo X" });
+      const r = await ag("propuesta", "POST", `/engagements/${E.a}/cadena`, { origen: x, destino: F.sqli, tipo: "habilita" });
+      assert.equal(r.status, 202, r.texto);
+      assert.equal((await enlace({ from_finding_id: F.sqli, to_finding_id: x, relation: "enables" })).status, 201);
+      const a = await aprobar(r.json.propuesta_id);
+      assert.equal(a.status, 409, a.texto);
+      assert.match(a.json.error, /ciclo/i);
+    });
+    test("borrar una relación o un hallazgo la saca de la cadena", async () => {
+      const g = await persona("GET", `/engagements/${E.a}/attack-chain`);
+      const l = g.json.links.find((x) => x.from_finding_id === F.sqli && x.to_finding_id === F.admin);
+      assert.equal((await persona("DELETE", `/engagements/${E.a}/attack-chain/${l.id}`)).status, 200);
+      assert.equal((await persona("DELETE", `/engagements/${E.a}/attack-chain/${l.id}`)).status, 404);
+      await sql("DELETE FROM findings WHERE id=?", [F.admin]);
+      assert.equal((await fila("SELECT COUNT(*) AS n FROM finding_links WHERE from_finding_id=? OR to_finding_id=?", [F.admin, F.admin])).n, 0);
+    });
+    test("sin nivel no relaciona, y un campo de más se rechaza", async () => {
+      assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/cadena`, { origen: F.sqli, destino: F.db, tipo: "habilita" })).status, 403);
+      assert.equal((await ag("escritura", "POST", `/engagements/${E.a}/cadena`, { origen: F.sqli, destino: F.db, tipo: "habilita", extra: 1 })).status, 400);
+    });
+  });
 });

@@ -31,6 +31,7 @@ const vulnerabilidades    = require("./vulnerabilidades");
 const agentes             = require("./agentes");
 const retest = require("./retest");
 const fases = require("./fases");
+const cadena = require("./cadena");
 const { reintentando } = require("./agentes/comun");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
@@ -988,6 +989,9 @@ async function initDB() {
     await inventarioCommunity.prepararEsquema({ qRows, qRun });
     await vulnerabilidades.crearTablasCompletas({ qRows, qRun });
   } catch (e) { console.error("[GUNGNIR] Inventario y vulnerabilidades: no se pudieron crear las tablas:", e.message); }
+
+  try { await cadena.crearTablas({ qRun }); }
+  catch (e) { console.error("[GUNGNIR] Cadena de ataque: no se pudo crear la tabla:", e.message); }
 
   try { await agentes.crearTablas({ qRun }); }
   catch (e) { console.error("[GUNGNIR] Agentes: no se pudieron crear las tablas:", e.message); }
@@ -2653,6 +2657,7 @@ const vulnerabilidadesApi = vulnerabilidades.montar(app, { auth, auditLog, qRow,
 
 // Agentes (opencode, Claude Code) por medio del servidor MCP de mcp/: sus keys solo valen en
 // /api/agente/v1. Las keys, los niveles y las propuestas se administran en /api/agentes.
+cadena.montar(app, { auth, auditLog, qRow, qRows, transaccion, ESCRIBEN });
 agentes.montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificarHallazgo, secretoBase: JWT_SECRET, carpeta: UPLOADS_DIR });
 
 // ── API KEYS ──────────────────────────────────────────────────────────────────

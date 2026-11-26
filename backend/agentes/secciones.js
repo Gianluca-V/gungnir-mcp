@@ -89,7 +89,28 @@ function validarResumen(b) {
 }
 const huellaDeResumen = (e) => crypto.createHash("sha256").update(JSON.stringify([e.report_summary ?? null])).digest("hex");
 
+/** Del agente salen en español; la tabla guarda los nombres del panel. */
+const RELACION = { habilita: "enables", escala: "escalates", pivota: "pivots" };
+const TIPO = Object.fromEntries(Object.entries(RELACION).map(([k, v]) => [v, k]));
+
+/**
+ * Relación de la cadena de ataque. Al aprobar, los dos hallazgos salen de lo propuesto (`fijo`): la
+ * persona corrige el tipo y la nota.
+ */
+function validarRelacion(b, fijo = null) {
+  exigirCampos(b, ["origen", "destino", "tipo", "nota", ...(fijo ? ["origen_titulo", "destino_titulo"] : [])], "de la relación");
+  const d = {
+    origen: fijo ? fijo.origen : texto(b.origen, "origen", { max: 36, obligatorio: true }),
+    destino: fijo ? fijo.destino : texto(b.destino, "destino", { max: 36, obligatorio: true }),
+    tipo: opcion(b.tipo, "tipo", Object.keys(RELACION), { obligatorio: true }),
+  };
+  const nota = texto(b.nota, "nota", { max: 5000 });
+  if (nota !== null) d.nota = nota;
+  H.exigirSinMarcas(d);
+  return fijo ? { ...d, origen_titulo: fijo.origen_titulo, destino_titulo: fijo.destino_titulo } : d;
+}
+
 module.exports = {
   FASES, ESTADOS_FASE, MAX_TEXTO, validarTiempo, validarFase, validarFaseCustom, huellaDeFase, aplicarFaseCustom, validarActualizacion,
-  validarResumen, huellaDeResumen,
+  validarResumen, huellaDeResumen, RELACION, TIPO, validarRelacion,
 };

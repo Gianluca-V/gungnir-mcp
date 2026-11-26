@@ -10,6 +10,8 @@ const H = require("./hallazgos");
 const { RESULTADOS } = require("../retest");
 const { nombresDe: nombresDeEquipo } = require("./mapa");
 const { evaluador } = require("./alcance");
+const cadena = require("../cadena");
+const { TIPO } = require("./secciones");
 const { CAMPOS_CLIENTE, nombresDe } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero, recortar } = require("./comun");
 const { CATALOGOS } = require("../data/metodologias");
@@ -163,6 +165,14 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
         puertos: suyos.slice(0, PUERTOS_POR_EQUIPO), ...(suyos.length > PUERTOS_POR_EQUIPO ? { puertos_total: suyos.length } : {}) };
     }), { max: req.query.completo === "1" ? LARGO_COMPLETO : LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null });
   }));
+
+  // ── Cadena de ataque ────────────────────────────────────────────────────────
+  router.get("/engagements/:id/cadena", con("lectura"), ruta((req, res) => lista(req, res, {
+    sql: `${cadena.SELECT_LINKS} ORDER BY l.created_at, l.id`,
+    params: [req.engagement.id],
+    preparar: (l) => ({ id: l.id, origen: l.from_finding_id, origen_titulo: l.from_title, destino: l.to_finding_id, destino_titulo: l.to_title,
+      tipo: TIPO[l.relation], nota: l.notes, de_agente: Boolean(l.created_by_agent) }),
+  })));
 
   // ── Logs, evidencias y técnicas ─────────────────────────────────────────────
   router.get("/engagements/:id/logs", con("lectura"), ruta(async (req, res) => {

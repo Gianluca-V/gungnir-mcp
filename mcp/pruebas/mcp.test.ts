@@ -157,7 +157,7 @@ describe('servidor MCP', () => {
   test('ofrece las herramientas, marca las que borran o pisan y no ejecuta nada por defecto', async () => {
     const { c } = await armar(() => ({}))
     const t = (await c.listTools()).tools
-    assert.equal(t.length, 26)
+    assert.equal(t.length, 28)
     assert.ok(!t.some((x) => x.name === 'ejecutar_herramienta'))
     assert.deepEqual(t.filter((x) => x.annotations?.destructiveHint).map((x) => x.name).sort(), ['borrar', 'marcar_metodologia', 'modificar_fase_custom', 'modificar_hallazgo'])
     for (const x of t) assert.ok(x.description && x.annotations?.readOnlyHint !== undefined, x.name)
@@ -169,8 +169,8 @@ describe('servidor MCP', () => {
   test('las definiciones entran en un presupuesto chico de contexto', async () => {
     const { c } = await armar(() => ({}))
     const bytes = JSON.stringify((await c.listTools()).tools).length
-    // 28 herramientas: unos 1.000 bytes cada una.
-    assert.ok(bytes < 30000, `${bytes} bytes`)
+    // 28 herramientas, unos 1.100 bytes cada una, como las primeras 21.
+    assert.ok(bytes < 32000, `${bytes} bytes`)
   })
   test('usa el engagement único, el configurado o el pedido, en ese orden de prioridad inverso', async () => {
     let x = await armar((p) => (p.ruta === '/engagements' ? lista(E1) : {}))
@@ -241,6 +241,7 @@ describe('servidor MCP', () => {
       ['registrar_tiempo', { minutos: 30, fase: 'recon' }, 'POST /tiempo'], ['cambiar_fase', { fase: 'recon' }, 'POST /fase'],
       ['modificar_fase_custom', { fase_custom: E2, plan: 'x' }, `PUT /fases-custom/${E2}`], ['publicar_actualizacion', { fase_custom: E2, contenido: 'x' }, `POST /fases-custom/${E2}/actualizaciones`],
       ['proponer_resumen', { resumen: 'x' }, 'POST /resumen'],
+      ['relacionar_hallazgos', { origen: E2, destino: E1, tipo: 'habilita' }, 'POST /cadena'], ['ver_cadena', {}, 'GET /cadena'],
     ]
     for (const [n, a, e] of casos) {
       const r = await x.llamar(n, a as Record<string, unknown>); assert.ok(!r.error, r.texto)
