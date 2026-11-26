@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api'
 import { generatePentestReport, type PentestReportData, type FindingDetail } from '@/lib/pentest-pdf'
+import { linksBetween, orderLinks, type ChainLink } from '@/lib/attack-chain'
 
 // ─── Tipos básicos ─────────────────────────────────────────────────────────────
 interface EngagementItem {
@@ -135,6 +136,7 @@ export function Reportes() {
   const [selected, setSelected]           = useState<EngagementItem | null>(null)
   const [findings, setFindings]           = useState<FindingDetail[]>([])
   const [scope, setScope]                 = useState<ScopeItem[]>([])
+  const [chainLinks, setChainLinks]       = useState<ChainLink[]>([])
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [generating, setGenerating]       = useState(false)
   const [orgSettings, setOrgSettings]     = useState<{ name?: string; email?: string; website?: string }>({})
@@ -143,7 +145,8 @@ export function Reportes() {
   const [includeSteps, setIncludeSteps]   = useState(true)
   const [includeScope, setIncludeScope]   = useState(true)
   const [onlyOpen, setOnlyOpen]           = useState(false)
-  const [summary, setSummary]             = useState('')
+  // Lo escrito vale para el engagement en que se escribió: al elegir otro se ve el suyo.
+  const [draft, setDraft]                 = useState<{ id: string; text: string } | null>(null)
   const [savingSummary, setSavingSummary] = useState(false)
   const [reportTemplate, setReportTemplate] = useState<'allsafe' | 'htb' | 'offsec' | 'ptes'>('allsafe')
 
@@ -167,7 +170,7 @@ export function Reportes() {
   }, [])
 
   // Cargar detalle cuando se selecciona un engagement
-  useEffect(() => { setSummary(selected?.report_summary ?? '') }, [selected])
+  const summary = draft && draft.id === selected?.id ? draft.text : (selected?.report_summary ?? '')
 
   const summaryDirty = !!selected && summary.trim() !== (selected.report_summary ?? '')
 
@@ -181,6 +184,7 @@ export function Reportes() {
       const actualizado = { ...selected, report_summary: r.report_summary }
       setEngagements(es => es.map(e => (e.id === selected.id ? actualizado : e)))
       setSelected(actualizado)
+      setDraft(null)
       toast.success('Resumen guardado')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar el resumen')
@@ -188,15 +192,18 @@ export function Reportes() {
   }
 
   useEffect(() => {
-    if (!selected) { setFindings([]); setScope([]); return }
+    if (!selected) { setFindings([]); setScope([]); setChainLinks([]); return }
     setLoadingDetail(true)
     Promise.all([
       apiFetch<FindingDetail[]>(`/engagements/${selected.id}/findings`),
       apiFetch<ScopeItem[]>(`/engagements/${selected.id}/scope`),
+      // Sin cadena el informe sale igual, sin esa sección.
+      apiFetch<{ links: ChainLink[] }>(`/engagements/${selected.id}/attack-chain`).catch(() => ({ links: [] })),
     ])
-      .then(([fRes, sRes]) => {
+      .then(([fRes, sRes, cRes]) => {
         setFindings(Array.isArray(fRes) ? fRes : [])
         setScope(Array.isArray(sRes) ? sRes : [])
+        setChainLinks(Array.isArray(cRes?.links) ? cRes.links : [])
       })
       .catch(() => {})
       .finally(() => setLoadingDetail(false))
@@ -228,6 +235,7 @@ export function Reportes() {
           scope_out:   scope.filter(s => !s.in_scope).map(s => s.value),
         },
         findings: displayedFindings,
+        chain: orderLinks(linksBetween(chainLinks, displayedFindings.map(f => f.id))),
         includeSteps,
         includeScope,
         org: orgSettings,
@@ -426,7 +434,7 @@ export function Reportes() {
                 maxLength={15000}
                 value={summary}
                 placeholder='Estado general, riesgos principales y recomendaciones para el cliente.'
-                onChange={e => setSummary(e.target.value)}
+                onChange={e => selected && setDraft({ id: selected.id, text: e.target.value })}
               />
               <div className='flex items-center justify-end gap-2'>
                 {summaryDirty && <span className='text-xs text-muted-foreground'>Sin guardar: el PDF usa lo que está escrito.</span>}

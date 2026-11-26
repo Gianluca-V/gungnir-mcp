@@ -4,7 +4,7 @@ import {
   CheckCircle2, Circle, Clock,
   ArrowLeft, Terminal, Upload, Crosshair,
   ShieldAlert, Target, Settings, Pencil, Check, X, Download, Paperclip, Map,
-  Timer, ListChecks,
+  Timer, ListChecks, Workflow,
 } from 'lucide-react'
 import { AttackMap } from '@/features/attack-map/components/AttackMap'
 import { TimeSheet } from './time-sheet'
@@ -24,6 +24,7 @@ import { ScopeSheet } from './scope-sheet'
 import { EvidenceSheet } from './evidence-sheet'
 import { CustomWorkspace } from './custom-workspace'
 import { TecnicasSheet } from './tecnicas-sheet'
+import { AttackChain } from '@/features/attack-chain/components/attack-chain'
 import { getPhaseLabel } from '@/features/engagements'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -116,6 +117,7 @@ export function EngagementWorkspace({ engagementId }: { engagementId: string }) 
 
   const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({})
   const [attackMapOpen, setAttackMapOpen] = useState(false)
+  const [chainOpen, setChainOpen]         = useState(false)
 
   // Inline title edit
   const [editingTitle, setEditingTitle] = useState(false)
@@ -366,6 +368,10 @@ export function EngagementWorkspace({ engagementId }: { engagementId: string }) 
             <Map className='mr-1.5 size-3' />Attack Map
           </Button>
           <Button size='sm' variant='ghost' className='w-full text-xs h-8 text-muted-foreground'
+            onClick={() => setChainOpen(true)}>
+            <Workflow className='mr-1.5 size-3' />{t('attack_chain.title')}
+          </Button>
+          <Button size='sm' variant='ghost' className='w-full text-xs h-8 text-muted-foreground'
             onClick={() => navigate({ to: '/engagements/$engagementId/editar', params: { engagementId } })}>
             <Settings className='mr-1.5 size-3' />
             {t('eng.edit_engagement')}
@@ -528,6 +534,21 @@ export function EngagementWorkspace({ engagementId }: { engagementId: string }) 
           </SheetHeader>
           <div className='p-6'>
             <AttackMap engagementId={engagementId} />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Attack chain sheet */}
+      <Sheet open={chainOpen} onOpenChange={setChainOpen}>
+        <SheetContent side='right' className='w-full max-w-full sm:max-w-[calc(100vw-13rem)] p-0 overflow-y-auto'>
+          <SheetHeader className='px-4 sm:px-6 pt-5 pb-3 border-b border-border'>
+            <SheetTitle className='flex items-center gap-2'>
+              <Workflow className='size-4 text-primary' />
+              {t('attack_chain.title')} - {engagement.title}
+            </SheetTitle>
+          </SheetHeader>
+          <div className='p-4 sm:p-6'>
+            {chainOpen && <AttackChain engagementId={engagementId} />}
           </div>
         </SheetContent>
       </Sheet>

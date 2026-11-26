@@ -2505,5 +2505,36 @@
       },
       "log_badge": "Out of scope"
     }
+  },
+  "attack_chain": {
+    "title": "Attack chain",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "error_load": "Could not load the attack chain",
+    "error_save": "Could not save the link",
+    "added": "Link added",
+    "deleted": "Link deleted",
+    "show_assets": "Hosts",
+    "show_techniques": "Phase techniques",
+    "show_unlinked": "Unlinked findings",
+    "graph_label_one": "Attack chain graph with {{count}} link. The list of steps repeats its content.",
+    "graph_label_other": "Attack chain graph with {{count}} links. The list of steps repeats its content.",
+    "empty": "No links yet. Join two findings to show how one led to the other.",
+    "no_findings": "The engagement has no findings.",
+    "add": "Link findings",
+    "from": "Source finding",
+    "to": "Finding reached",
+    "pick": "Pick a finding",
+    "relation_label": "Relation",
+    "notes": "How one led to the other",
+    "delete": "Delete link",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "by_agent": "Agent",
+    "relation": {
+      "enables": "enables",
+      "escalates": "escalates to",
+      "pivots": "pivots to"
+    }
   }
 }

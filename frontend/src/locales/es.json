@@ -2505,5 +2505,36 @@
       },
       "log_badge": "Fuera de alcance"
     }
+  },
+  "attack_chain": {
+    "title": "Cadena de ataque",
+    "refresh": "Actualizar",
+    "retry": "Reintentar",
+    "error_load": "No se pudo cargar la cadena de ataque",
+    "error_save": "No se pudo guardar la relación",
+    "added": "Relación agregada",
+    "deleted": "Relación borrada",
+    "show_assets": "Equipos",
+    "show_techniques": "Técnicas de la fase",
+    "show_unlinked": "Hallazgos sin relación",
+    "graph_label_one": "Grafo de la cadena de ataque con {{count}} relación. La lista de pasos repite su contenido.",
+    "graph_label_other": "Grafo de la cadena de ataque con {{count}} relaciones. La lista de pasos repite su contenido.",
+    "empty": "Todavía no hay relaciones. Uní dos hallazgos para mostrar cómo uno llevó al otro.",
+    "no_findings": "El engagement no tiene hallazgos.",
+    "add": "Relacionar hallazgos",
+    "from": "Hallazgo de origen",
+    "to": "Hallazgo al que se llegó",
+    "pick": "Elegí un hallazgo",
+    "relation_label": "Relación",
+    "notes": "Cómo se pasó de uno al otro",
+    "delete": "Borrar relación",
+    "steps_one": "{{count}} paso",
+    "steps_other": "{{count}} pasos",
+    "by_agent": "Agente",
+    "relation": {
+      "enables": "habilita",
+      "escalates": "escala a",
+      "pivots": "pivota a"
+    }
   }
 }
