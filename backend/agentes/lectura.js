@@ -11,6 +11,8 @@ const { RESULTADOS } = require("../retest");
 const { nombresDe: nombresDeEquipo } = require("./mapa");
 const { evaluador } = require("./alcance");
 const cadena = require("../cadena");
+const consultas = require("./consultas");
+const resumenes = require("../resumenes");
 const { TIPO } = require("./secciones");
 const { CAMPOS_CLIENTE, nombresDe } = require("./acceso");
 const { ErrorHttp, ruta, texto, opcion, entero, recortar } = require("./comun");
@@ -37,7 +39,7 @@ function recortarObjeto(o, max) {
 }
 const palabras = (q) => String(q || "").toLocaleLowerCase("es").split(/\s+/).filter(Boolean).slice(0, 10);
 
-function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
+function montar(router, { acceso, auditLog, qRow, qRows, buscarCve, explotacion, consultarRecon, buscarEnExploitdb }) {
   const con = acceso.conEngagement;
   /** Responde datos guardados: primero se oculta y después se recorta, para no dejar secretos a medias. */
   const entregar = (req, res, datos, { max = LARGO_CAMPO, ...extra } = {}) => {
@@ -81,12 +83,14 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
     const fases = await qRows("SELECT phase_type, status FROM phases WHERE engagement_id=? ORDER BY FIELD(phase_type,'planning','recon','scanning','exploitation','post_exploitation','reporting')", [e.id]);
     const sev = await qRows("SELECT severity, COUNT(*) AS n FROM findings WHERE engagement_id=? GROUP BY severity", [e.id]);
     const alcance = await qRow("SELECT SUM(in_scope=1) AS dentro, SUM(in_scope=0) AS fuera FROM scope_items WHERE engagement_id=?", [e.id]);
+    const remediacion = resumenes.remediacion(await qRows(`SELECT ${resumenes.COLUMNAS_REMEDIACION} FROM findings WHERE engagement_id=?`, [e.id]));
     const custom = e.mode !== "custom" ? null : (await qRows(
       "SELECT id, name, description, status, work_plan FROM custom_phases WHERE engagement_id=? ORDER BY order_index, created_at, id", [e.id]))
       .map((f) => ({ id: f.id, nombre: f.name, descripcion: recortar(f.description, LARGO_LISTA), estado: f.status, plan: recortar(f.work_plan, LARGO_CAMPO) }));
     entregar(req, res, {
       ...e, fases, ...(custom ? { fases_custom: custom } : {}), hallazgos_por_severidad: Object.fromEntries(sev.map((s) => [s.severity, Number(s.n)])),
       alcance: { dentro: Number(alcance?.dentro || 0), fuera: Number(alcance?.fuera || 0) },
+      remediacion: { ...remediacion, diffs: remediacion.diffs.slice(0, 50) },
     }, { nivel_efectivo: req.engagement.nivel, max: 12000 });
   }));
 
@@ -253,6 +257,8 @@ function montar(router, { acceso, qRow, qRows, buscarCve, explotacion }) {
     const datos = await buscarCve(cve);
     entregar(req, res, { ...datos, explotacion: await explotacion(cve, datos.severity) });
   }));
+
+  consultas.montar(router, { acceso, auditLog, qRow, qRows, consultarRecon, buscarEnExploitdb, entregar, lista, paginar });
 }
 
 module.exports = { montar, ESTADOS_METODOLOGIA };

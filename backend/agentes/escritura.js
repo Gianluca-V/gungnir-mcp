@@ -30,6 +30,7 @@ const TIPOS = {
   ".pdf": "application/pdf", ".txt": "text/plain", ".log": "text/plain", ".md": "text/plain", ".csv": "text/csv",
   ".xml": "text/plain", ".nessus": "text/plain", ".json": "application/json", ".jsonl": "text/plain", ".zip": "application/zip",
 };
+const IMAGENES = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
 const MB = 1024 * 1024;
 const VENTANA_EN_CURSO_MIN = 10;
 const TOPE_VIOLACIONES = 50;
@@ -220,17 +221,29 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
   }));
 
   // ── Evidencias ──────────────────────────────────────────────────────────────
-  async function guardarArchivo(req, tx, { hallazgoId = null, fase = null, descripcion = null }) {
+  /** Nombre y tipo del archivo subido, solo con las extensiones que se admiten. */
+  function tipoDe(req, admitidas = Object.keys(TIPOS)) {
+    if (!req.file) throw new ErrorHttp(400, `Falta el archivo (campo "archivo").`);
     const nombre = path.basename(Buffer.from(req.file.originalname, "latin1").toString("utf8")).slice(0, 255);
-    const tipo = TIPOS[path.extname(nombre).toLowerCase()];
-    if (!tipo) throw new ErrorHttp(400, `Tipo de archivo no admitido. Se admiten: ${Object.keys(TIPOS).join(" ")}.`);
-    const id = uuidv4(), archivo = crypto.randomBytes(16).toString("hex");
-    await tx.qRun(
-      "INSERT INTO evidences (id,engagement_id,finding_id,phase_type,filename,original_name,file_type,file_size,caption,uploaded_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      [id, req.engagement.id, hallazgoId, fase, archivo, nombre, tipo, req.file.size, descripcion, req.agente.userId]);
+    const ext = path.extname(nombre).toLowerCase();
+    if (!admitidas.includes(ext)) throw new ErrorHttp(400, `Tipo de archivo no admitido. Se admiten: ${admitidas.join(" ")}.`);
+    return { nombre, tipo: TIPOS[ext] };
+  }
+  /** Escribe el archivo con un nombre al azar. Si la transacción falla, `escribir` lo borra. */
+  async function escribirArchivo(req) {
+    const archivo = crypto.randomBytes(16).toString("hex");
     // Se anota antes de escribir: si se corta a la mitad, también hay que borrarlo.
     req.archivosEscritos = [...(req.archivosEscritos || []), archivo];
     await fs.promises.writeFile(path.join(carpeta, archivo), req.file.buffer, { flag: "wx" });
+    return archivo;
+  }
+
+  async function guardarArchivo(req, tx, { hallazgoId = null, fase = null, descripcion = null }) {
+    const { nombre, tipo } = tipoDe(req);
+    const id = uuidv4(), archivo = await escribirArchivo(req);
+    await tx.qRun(
+      "INSERT INTO evidences (id,engagement_id,finding_id,phase_type,filename,original_name,file_type,file_size,caption,uploaded_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      [id, req.engagement.id, hallazgoId, fase, archivo, nombre, tipo, req.file.size, descripcion, req.agente.userId]);
     return { id, nombre };
   }
 
@@ -420,6 +433,44 @@ function montar(router, { acceso, auditLog, qRow, qRows, qRun, transaccion, noti
     const id = uuidv4();
     await tx.qRun("INSERT INTO custom_phase_updates (id,phase_id,content,created_by) VALUES (?,?,?,?)", [id, f.id, contenido, req.agente.userId]);
     return { codigo: 201, cuerpo: { actualizacion_id: id }, despues: () => anotar(req, "actualizacion", "custom_phase_updates", id, f.name) };
+  }));
+
+  // Documentos de la fase y fotos de un avance: lo mismo que una evidencia, en el modo custom.
+  router.post("/engagements/:id/fases-custom/:fid/documentos", con("propuesta"), recibir, escribir(async (req, tx) => {
+    const { nombre, tipo } = tipoDe(req);
+    const descripcion = texto(req.body.descripcion, "descripcion", { max: 500 });
+    H.exigirSinMarcas(descripcion);
+    const f = await faseCustom(tx, req);
+    const id = uuidv4(), archivo = await escribirArchivo(req);
+    await tx.qRun("INSERT INTO custom_phase_docs (id,phase_id,engagement_id,filename,original_name,file_type,file_size,caption,uploaded_by) VALUES (?,?,?,?,?,?,?,?,?)",
+      [id, f.id, req.engagement.id, archivo, nombre, tipo, req.file.size, descripcion, req.agente.userId]);
+    return { codigo: 201, cuerpo: { documento_id: id, nombre, bytes: req.file.size }, despues: () => anotar(req, "documento", "custom_phase_docs", id, `${f.name}: ${nombre}`) };
+  }));
+
+  router.post("/engagements/:id/fases-custom/:fid/actualizaciones/:aid/imagenes", con("propuesta"), recibir, escribir(async (req, tx) => {
+    const { nombre } = tipoDe(req, IMAGENES);
+    const f = await faseCustom(tx, req);
+    if (!(await tx.qRow("SELECT id FROM custom_phase_updates WHERE id=? AND phase_id=?", [req.params.aid, f.id])))
+      throw new ErrorHttp(404, "La actualización no existe en esa fase.");
+    const id = uuidv4(), archivo = await escribirArchivo(req);
+    await tx.qRun("INSERT INTO custom_phase_update_images (id,update_id,filename,original_name,file_size) VALUES (?,?,?,?,?)", [id, req.params.aid, archivo, nombre, req.file.size]);
+    return { codigo: 201, cuerpo: { imagen_id: id, nombre, bytes: req.file.size }, despues: () => anotar(req, "imagen", "custom_phase_update_images", id, `${f.name}: ${nombre}`) };
+  }));
+
+  // ── Notas ───────────────────────────────────────────────────────────────────
+  // Van a la libreta del dueño de la key, vinculadas al engagement. No se comparten desde acá.
+  router.post("/engagements/:id/notas", con("propuesta"), escribir(async (req, tx) => {
+    const b = req.body || {};
+    H.exigirSinMarcas(b);
+    const titulo = texto(b.titulo, "titulo", { max: 255, obligatorio: true });
+    const contenido = texto(b.contenido, "contenido", { max: 100000 }) || "";
+    const tags = b.etiquetas === undefined ? [] : b.etiquetas;
+    if (!Array.isArray(tags) || tags.length > 20) throw new ErrorHttp(400, `"etiquetas" tiene que ser una lista de hasta 20 textos.`);
+    const limpias = [...new Set(tags.map((t) => texto(t, "etiquetas", { max: 50, obligatorio: true })))];
+    const id = uuidv4();
+    await tx.qRun("INSERT INTO notes (id,user_id,title,content,tags,is_pinned,engagement_id) VALUES (?,?,?,?,?,0,?)",
+      [id, req.agente.userId, titulo, contenido, JSON.stringify(limpias), req.engagement.id]);
+    return { codigo: 201, cuerpo: { nota_id: id }, despues: () => anotar(req, "nota", "notes", id, titulo) };
   }));
 
   // ── Resumen del informe ─────────────────────────────────────────────────────

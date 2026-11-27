@@ -32,6 +32,10 @@ const ACCIONES = [
   ["PUT", /^\/engagements\/[^/]+\/fases-custom\//i, "fase_custom"],
   ["POST", /^\/engagements\/[^/]+\/resumen\/?$/i, "resumen"],
   ["POST", /^\/engagements\/[^/]+\/cadena\/?$/i, "cadena"],
+  ["POST", /^\/engagements\/[^/]+\/recon\/?$/i, "recon"],
+  ["POST", /^\/engagements\/[^/]+\/notas\/?$/i, "nota"],
+  ["POST", /^\/engagements\/[^/]+\/fases-custom\/[^/]+\/documentos\/?$/i, "documento"],
+  ["POST", /^\/engagements\/[^/]+\/fases-custom\/[^/]+\/actualizaciones\/[^/]+\/imagenes\/?$/i, "imagen"],
 ];
 function accionDe(metodo, ruta) {
   if (metodo === "GET" || metodo === "HEAD") return "consulta";
@@ -43,7 +47,7 @@ const corto = (v, n = 500) => (typeof v === "string" && v.trim() ? v.trim().slic
 /** Sobre qué fue el pedido. El cuerpo lo manda el agente: puede traer cualquier cosa. */
 function objetivoDe(req, ruta) {
   const b = req.body && typeof req.body === "object" ? req.body : {};
-  const partes = [corto(b.title, 300), corto(b.affected_asset), corto(b.objetivo), corto(b.nombre, 200), req.file && corto(Buffer.from(req.file.originalname, "latin1").toString("utf8"), 255)].filter(Boolean);
+  const partes = [corto(b.title, 300), corto(b.affected_asset), corto(b.objetivo), corto(b.nombre, 200), corto(b.titulo, 255), req.file && corto(Buffer.from(req.file.originalname, "latin1").toString("utf8"), 255)].filter(Boolean);
   if (Array.isArray(b.equipos)) partes.push(b.equipos.slice(0, 20).map((e) => corto(e?.objetivo, 100)).filter(Boolean).join(", "));
   if (!partes.length) partes.push(corto(/\/(?:metodologia|hallazgos|logs|evidencias)\/([\w-]{1,80})/.exec(ruta)?.[1]));
   return corto(partes.filter(Boolean).join(" · "));

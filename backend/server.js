@@ -32,6 +32,7 @@ const agentes             = require("./agentes");
 const retest = require("./retest");
 const fases = require("./fases");
 const cadena = require("./cadena");
+const resumenes = require("./resumenes");
 const { reintentando } = require("./agentes/comun");
 
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
@@ -2092,30 +2093,8 @@ app.post("/api/engagements/:id/findings/:fid/accept-risk", auth(ESCRIBEN), async
 });
 
 app.get("/api/engagements/:id/remediation-summary", auth(), async (req, res) => {
-  const rows = await qRows(
-    `SELECT id,title,severity,initial_severity,retest_status,retest_severity,
-      status,remediation_due_date,retested_at,risk_accepted_at
-     FROM findings WHERE engagement_id=?`,
-    [req.params.id]
-  );
-  const hoy = new Date(); hoy.setHours(0,0,0,0);
-  const resumen = {
-    total: rows.length,
-    por_retest: { not_retested: 0, passed: 0, failed: 0, partial: 0 },
-    por_status: { open: 0, in_remediation: 0, fixed: 0, accepted: 0 },
-    vencidos: 0,
-    diffs: [],
-  };
-  for (const r of rows) {
-    resumen.por_retest[r.retest_status] = (resumen.por_retest[r.retest_status] || 0) + 1;
-    resumen.por_status[r.status] = (resumen.por_status[r.status] || 0) + 1;
-    if (r.remediation_due_date && new Date(r.remediation_due_date) < hoy
-        && !["fixed","accepted"].includes(r.status)) resumen.vencidos++;
-    if (r.retest_status !== "not_retested" && r.initial_severity && r.initial_severity !== (r.retest_severity || r.severity)) {
-      resumen.diffs.push({ id: r.id, title: r.title, de: r.initial_severity, a: r.retest_severity || r.severity });
-    }
-  }
-  res.json(resumen);
+  const rows = await qRows(`SELECT ${resumenes.COLUMNAS_REMEDIACION} FROM findings WHERE engagement_id=?`, [req.params.id]);
+  res.json(resumenes.remediacion(rows));
 });
 
 app.delete("/api/engagements/:id/findings/:fid", auth(["admin","auditor"]), async (req, res) => {
@@ -2658,7 +2637,8 @@ const vulnerabilidadesApi = vulnerabilidades.montar(app, { auth, auditLog, qRow,
 // Agentes (opencode, Claude Code) por medio del servidor MCP de mcp/: sus keys solo valen en
 // /api/agente/v1. Las keys, los niveles y las propuestas se administran en /api/agentes.
 cadena.montar(app, { auth, auditLog, qRow, qRows, transaccion, ESCRIBEN });
-agentes.montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificarHallazgo, secretoBase: JWT_SECRET, carpeta: UPLOADS_DIR });
+agentes.montar(app, { auth, auditLog, qRow, qRows, qRun, transaccion, notificarHallazgo, secretoBase: JWT_SECRET, carpeta: UPLOADS_DIR,
+  consultarRecon, buscarEnExploitdb });
 
 // ── API KEYS ──────────────────────────────────────────────────────────────────
 const crypto = require("crypto");
@@ -3256,34 +3236,10 @@ app.delete("/api/engagements/:id/techniques/:techId", auth(["admin","auditor","p
 });
 
 // ── Export de técnicas como capa ATT&CK Navigator (interoperable con Gjallarhorn) ──
-const _COLOR_FASE = {
-  planning: "#8b5cf6", recon: "#3b82f6", scanning: "#06b6d4",
-  exploitation: "#e8192c", post_exploitation: "#f97316", reporting: "#22c55e",
-};
 app.get("/api/engagements/:id/attack-navigator.json", auth(), async (req, res) => {
-  const eng = await qRow("SELECT name FROM engagements WHERE id=?", [req.params.id]);
+  const eng = await qRow("SELECT title FROM engagements WHERE id=?", [req.params.id]);
   if (!eng) return res.status(404).json({ error: "Engagement no encontrado" });
-  const tecs = await qRows(
-    "SELECT mitre_id, name, tactic, phase_type, notes FROM engagement_techniques WHERE engagement_id=? AND mitre_id IS NOT NULL AND mitre_id<>''",
-    [req.params.id]
-  );
-  const vistas = new Map();
-  for (const t of tecs) { const k = String(t.mitre_id).toUpperCase().trim(); if (!vistas.has(k)) vistas.set(k, t); }
-  const techniques = [...vistas.entries()].map(([id, t]) => ({
-    techniqueID: id,
-    color: _COLOR_FASE[t.phase_type] || "#e8192c",
-    comment: [t.name, t.tactic, t.notes].filter(Boolean).join(" - ").slice(0, 500),
-    enabled: true,
-  }));
-  const layer = {
-    name: `Gungnir - ${eng.name}`.slice(0, 120),
-    versions: { attack: "14", navigator: "4.9", layer: "4.5" },
-    domain: "enterprise-attack",
-    description: `Técnicas ATT&CK ejercidas en el engagement (Gungnir)`,
-    techniques,
-    gradient: { colors: ["#ffffff", "#e8192c"], minValue: 0, maxValue: 100 },
-    legendItems: [], showTacticRowBackground: false, hideDisabled: false,
-  };
+  const layer = resumenes.capaNavigator(eng.title, await qRows(resumenes.SELECT_TECNICAS_NAVIGATOR, [req.params.id]));
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="attack-navigator-${req.params.id}.json"`);
   res.send(JSON.stringify(layer, null, 2));
@@ -3300,15 +3256,7 @@ app.get("/api/engagements/:id/time", auth(), async (req, res) => {
       ORDER BY te.worked_on DESC, te.created_at DESC`,
     [req.params.id]
   );
-  const resumen = { total_minutes: 0, por_fase: {}, por_operador: {} };
-  for (const r of rows) {
-    resumen.total_minutes += r.minutes || 0;
-    const fase = r.custom_phase_name || r.phase_type || "sin_fase";
-    resumen.por_fase[fase] = (resumen.por_fase[fase] || 0) + (r.minutes || 0);
-    const quien = r.user_name || "-";
-    resumen.por_operador[quien] = (resumen.por_operador[quien] || 0) + (r.minutes || 0);
-  }
-  res.json({ entries: rows, resumen });
+  res.json({ entries: rows, resumen: resumenes.tiempo(rows) });
 });
 
 app.post("/api/engagements/:id/time", auth(ESCRIBEN), async (req, res) => {
@@ -3629,19 +3577,20 @@ app.get("/api/integrations/recon-keys/status", auth(), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // INTEGRATIONS - RECON QUERY (Shodan + free APIs)
 // ─────────────────────────────────────────────────────────────────────────────
-app.post("/api/integrations/recon/query", auth(), async (req, res) => {
-  const { target } = req.body;
-  if (!target || !target.trim()) return res.status(400).json({ error: "target es requerido" });
-
-  // Load API keys
+/** Consulta pasiva de un objetivo. Un error de un servicio puede citar la URL: ninguna key sale en la respuesta. */
+async function consultarRecon(target) {
   const apiKeys = {};
   for (const svc of RECON_KEY_SERVICES) {
     const row = await qRow("SELECT `value` FROM settings WHERE `key`=?", [`recon_key_${svc}`]);
     if (row?.value) apiKeys[svc] = row.value;
   }
-
+  return reconInt.ocultarClaves(await reconInt.queryTarget(target, apiKeys), apiKeys);
+}
+app.post("/api/integrations/recon/query", auth(), async (req, res) => {
+  const { target } = req.body;
+  if (!target || !target.trim()) return res.status(400).json({ error: "target es requerido" });
   try {
-    const result = await reconInt.queryTarget(target.trim(), apiKeys);
+    const result = await consultarRecon(target.trim());
     auditLog(req.user.id, req.user.username, "recon_query", "recon", null, `target=${target.trim()}`, req.ip);
     res.json(result);
   } catch (e) {
@@ -3910,26 +3859,31 @@ function edbFetch(urlStr, redirects = 3) {
   });
 }
 
+/** Papers públicos de Exploit-DB: { total, papers }, o { error } si el sitio respondió algo inesperado. */
+async function buscarEnExploitdb(q) {
+  const r = await edbFetch(`https://www.exploit-db.com/search?action=search&q=${encodeURIComponent(q)}&papers=1`);
+  if (r.status !== 200) return { error: `Exploit-DB respondió HTTP ${r.status}` };
+  let data;
+  try { data = JSON.parse(r.body.toString("utf8")); } catch { return { error: "Respuesta inesperada de Exploit-DB" }; }
+  const papers = (data.data || []).map(p => ({
+    id:     p.id,
+    title:  p.title || p.description || "(sin título)",
+    author: p.author?.name || p.author || "",
+    date:   p.date || p.date_published || "",
+    file:   p.file || "",
+    edb_id: p.id,
+  }));
+  return { total: data.recordsFiltered || papers.length, papers };
+}
+
 app.get("/api/exploitdb/search", auth(), async (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q || q.length < 2)  return res.status(400).json({ error: "Ingresá al menos 2 caracteres" });
   if (q.length > 120)       return res.status(400).json({ error: "Query demasiado larga" });
   try {
-    const url = `https://www.exploit-db.com/search?action=search&q=${encodeURIComponent(q)}&papers=1`;
-    const r   = await edbFetch(url);
-    if (r.status !== 200) return res.status(502).json({ error: `Exploit-DB respondió HTTP ${r.status}` });
-    let data;
-    try { data = JSON.parse(r.body.toString("utf8")); }
-    catch { return res.status(502).json({ error: "Respuesta inesperada de Exploit-DB" }); }
-    const papers = (data.data || []).map(p => ({
-      id:     p.id,
-      title:  p.title || p.description || "(sin título)",
-      author: p.author?.name || p.author || "",
-      date:   p.date || p.date_published || "",
-      file:   p.file || "",
-      edb_id: p.id,
-    }));
-    res.json({ total: data.recordsFiltered || papers.length, papers });
+    const r = await buscarEnExploitdb(q);
+    if (r.error) return res.status(502).json({ error: r.error });
+    res.json(r);
   } catch (e) {
     console.error("[EDB SEARCH]", e.message);
     res.status(502).json({ error: `Error al consultar Exploit-DB: ${e.message}` });

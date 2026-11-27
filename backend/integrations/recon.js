@@ -255,4 +255,11 @@ async function queryTarget(target, apiKeys = {}) {
   }
 }
 
-module.exports = { queryTarget, shodanHost, shodanDnsResolve, shodanDnsReverse, shodanAccountInfo, rdapDomain, crtshSubdomains, dnsLookup };
+/** Copia del resultado sin ninguna de las keys: el error de un servicio puede citar su URL con la key. */
+function ocultarClaves(resultado, apiKeys = {}) {
+  const claves = Object.values(apiKeys).map(String).filter((k) => k.length >= 4);
+  if (!claves.length) return resultado;
+  return JSON.parse(claves.reduce((s, k) => s.split(k).join("[OCULTO]"), JSON.stringify(resultado)));
+}
+
+module.exports = { ocultarClaves, queryTarget, shodanHost, shodanDnsResolve, shodanDnsReverse, shodanAccountInfo, rdapDomain, crtshSubdomains, dnsLookup };

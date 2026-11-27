@@ -2226,7 +2226,11 @@
         "fase_custom": "Change custom phase",
         "actualizacion": "Post update",
         "resumen": "Propose summary",
-        "cadena": "Link findings"
+        "cadena": "Link findings",
+        "recon": "Passive recon",
+        "nota": "Note",
+        "documento": "Phase document",
+        "imagen": "Update image"
       }
     },
     "edit": {

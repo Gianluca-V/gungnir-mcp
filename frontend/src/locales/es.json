@@ -2226,7 +2226,11 @@
         "fase_custom": "Modificar fase custom",
         "actualizacion": "Publicar actualización",
         "resumen": "Proponer resumen",
-        "cadena": "Relacionar hallazgos"
+        "cadena": "Relacionar hallazgos",
+        "recon": "Recon pasivo",
+        "nota": "Nota",
+        "documento": "Documento de fase",
+        "imagen": "Imagen de actualización"
       }
     },
     "edit": {
