@@ -157,7 +157,7 @@ describe('servidor MCP', () => {
   test('ofrece las herramientas, marca las que borran o pisan y no ejecuta nada por defecto', async () => {
     const { c } = await armar(() => ({}))
     const t = (await c.listTools()).tools
-    assert.equal(t.length, 28)
+    assert.equal(t.length, 34)
     assert.ok(!t.some((x) => x.name === 'ejecutar_herramienta'))
     assert.deepEqual(t.filter((x) => x.annotations?.destructiveHint).map((x) => x.name).sort(), ['borrar', 'marcar_metodologia', 'modificar_fase_custom', 'modificar_hallazgo'])
     for (const x of t) assert.ok(x.description && x.annotations?.readOnlyHint !== undefined, x.name)
@@ -169,8 +169,8 @@ describe('servidor MCP', () => {
   test('las definiciones entran en un presupuesto chico de contexto', async () => {
     const { c } = await armar(() => ({}))
     const bytes = JSON.stringify((await c.listTools()).tools).length
-    // 28 herramientas, unos 1.100 bytes cada una, como las primeras 21.
-    assert.ok(bytes < 32000, `${bytes} bytes`)
+    // 34 herramientas, unos 1.100 bytes cada una, como las primeras 21.
+    assert.ok(bytes < 38500, `${bytes} bytes`)
   })
   test('usa el engagement único, el configurado o el pedido, en ese orden de prioridad inverso', async () => {
     let x = await armar((p) => (p.ruta === '/engagements' ? lista(E1) : {}))
@@ -186,7 +186,10 @@ describe('servidor MCP', () => {
     const x = await armar(() => ({}), { engagement: E1 })
     for (const [n, a] of [['registrar_log', { fase: 'recon', notas: 'x', objetvo: '1.1.1.1' }], ['ver_hallazgo', { id: '../../usuarios' }], ['ver_engagement', { engagement: '..' }],
       ['marcar_metodologia', { item: '../x', estado: 'tested' }], ['borrar', { tipo: 'usuarios', id: E1 }], ['consultar_cve', { cve: 'CVE-1' }],
-      ['buscar_plantillas', { id: '..' }], ['buscar_plantillas', { id: 'p1', q: 'x' }]] as const)
+      ['buscar_plantillas', { id: '..' }], ['buscar_plantillas', { id: 'p1', q: 'x' }],
+      ['listar_registros', { tipo: 'logs', id: E2 }], ['listar_registros', { tipo: 'notas', id: E2, limite: 5 }],
+      ['buscar_papers', { fuente: 'exploitdb', id: E2 }], ['buscar_papers', { fuente: 'propios', id: E2, q: 'x' }],
+      ['adjuntar_a_fase_custom', { fase_custom: E2, ruta: 'a.png', actualizacion: E2, descripcion: 'x' }]] as const)
       assert.ok((await x.llamar(n, a)).error, n)
     assert.equal(x.pedidos.length, 0)
   })
@@ -213,6 +216,10 @@ describe('servidor MCP', () => {
     assert.deepEqual([x.pedidos[0]!.ruta, x.pedidos[0]!.opciones.cuerpo, x.pedidos[0]!.opciones.archivo.nombre], [`/engagements/${E1}/importar`, { formato: 'nmap', severidad_minima: 'high' }, 's.xml'])
     await x.llamar('adjuntar_evidencia', { ruta: 's.xml', hallazgo_id: E2 })
     assert.deepEqual([x.pedidos[1]!.ruta, x.pedidos[1]!.opciones.cuerpo], [`/engagements/${E1}/evidencias`, { hallazgo_id: E2 }])
+    await x.llamar('adjuntar_a_fase_custom', { fase_custom: E2, ruta: 's.xml', descripcion: 'Plan' })
+    assert.deepEqual([x.pedidos[2]!.ruta, x.pedidos[2]!.opciones.cuerpo, x.pedidos[2]!.opciones.archivo.nombre], [`/engagements/${E1}/fases-custom/${E2}/documentos`, { descripcion: 'Plan' }, 's.xml'])
+    await x.llamar('adjuntar_a_fase_custom', { fase_custom: E2, ruta: 's.xml', actualizacion: E1 })
+    assert.deepEqual([x.pedidos[3]!.ruta, x.pedidos[3]!.opciones.cuerpo], [`/engagements/${E1}/fases-custom/${E2}/actualizaciones/${E1}/imagenes`, {}])
     rmSync(raiz, { recursive: true, force: true })
   })
   test('listar_engagements junta la key y la lista', async () => {
@@ -242,6 +249,9 @@ describe('servidor MCP', () => {
       ['modificar_fase_custom', { fase_custom: E2, plan: 'x' }, `PUT /fases-custom/${E2}`], ['publicar_actualizacion', { fase_custom: E2, contenido: 'x' }, `POST /fases-custom/${E2}/actualizaciones`],
       ['proponer_resumen', { resumen: 'x' }, 'POST /resumen'],
       ['relacionar_hallazgos', { origen: E2, destino: E1, tipo: 'habilita' }, 'POST /cadena'], ['ver_cadena', {}, 'GET /cadena'],
+      ['listar_registros', { tipo: 'tiempo' }, 'GET /tiempo'], ['listar_registros', { tipo: 'notas' }, 'GET /notas'], ['listar_registros', { tipo: 'notas', id: E2 }, `GET /notas/${E2}`],
+      ['listar_registros', { tipo: 'documentos' }, 'GET /documentos'], ['ver_vulnerabilidades', { severidad: 'high', q: 'ssh' }, 'GET /vulnerabilidades'],
+      ['exportar_navigator', {}, 'GET /navigator'], ['consultar_recon', { objetivo: 'ejemplo.test' }, 'POST /recon'], ['escribir_nota', { titulo: 'x', etiquetas: ['a'] }, 'POST /notas'],
     ]
     for (const [n, a, e] of casos) {
       const r = await x.llamar(n, a as Record<string, unknown>); assert.ok(!r.error, r.texto)
@@ -249,7 +259,8 @@ describe('servidor MCP', () => {
       assert.equal(`${p.metodo} ${p.ruta.replace(`/engagements/${E1}`, '')}`, e)
       assert.ok(!JSON.stringify(p.opciones ?? {}).includes('engagement'))
     }
-    for (const [n, a, e] of [['buscar_arsenal', { q: 'x' }, '/arsenal'], ['buscar_plantillas', { id: 'p1' }, '/plantillas/p1'], ['consultar_cve', { cve: 'cve-2024-1234' }, '/cve/CVE-2024-1234']] as const) {
+    for (const [n, a, e] of [['buscar_arsenal', { q: 'x' }, '/arsenal'], ['buscar_plantillas', { id: 'p1' }, '/plantillas/p1'], ['consultar_cve', { cve: 'cve-2024-1234' }, '/cve/CVE-2024-1234'],
+      ['buscar_papers', { fuente: 'exploitdb', q: 'kerberos' }, '/exploitdb'], ['buscar_papers', { fuente: 'propios' }, '/papers'], ['buscar_papers', { fuente: 'propios', id: E2 }, `/papers/${E2}`]] as const) {
       await x.llamar(n, a); assert.equal(x.pedidos.at(-1)!.ruta, e)
     }
   })

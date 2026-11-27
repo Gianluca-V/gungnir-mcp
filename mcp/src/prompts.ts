@@ -19,13 +19,15 @@ export const PROMPTS: PromptDeFase[] = [
 1. ver_engagement: leé las reglas, las fechas y el nivel que tenés.
 2. ver_alcance: separá lo que está dentro de lo excluido y señalá lo ambiguo.
 3. ver_metodologia con estado "pending": elegí por dónde empezar.
+4. ver_vulnerabilidades: lo que el seguimiento continuo ya conoce de esos activos, para no redescubrirlo.
 Entregá un plan breve por fase, con los riesgos y las dudas que tiene que resolver una persona antes de arrancar.
 Si el engagement es custom, modificar_fase_custom con el plan de cada fase. Al terminar una fase, cambiar_fase.`),
   fase('reconocimiento', 'Reconocimiento', 'Superficie expuesta, sin explotar nada',
     `Relevá la superficie de los objetivos en alcance, de lo pasivo a lo activo.
 1. listar_registros (tipo "logs", fase "recon"): no repitas lo hecho.
-2. buscar_arsenal con fase "recon" para elegir comandos.
-3. Anotá en el log lo que aporta cada paso. Un activo nuevo que no esté en el alcance se informa, no se prueba.`),
+2. consultar_recon por cada dominio o IP en alcance: es pasivo y no toca el objetivo.
+3. buscar_arsenal con fase "recon" para elegir comandos.
+4. Anotá en el log lo que aporta cada paso. Un activo nuevo que no esté en el alcance se informa, no se prueba.`),
   fase('escaneo', 'Escaneo', 'Servicios y vulnerabilidades candidatas',
     `Enumerá servicios y vulnerabilidades de los objetivos en alcance.
 1. Elegí la intensidad según las reglas del engagement y guardá la salida en un archivo (por ejemplo, nmap -oX).
@@ -34,7 +36,7 @@ Si el engagement es custom, modificar_fase_custom con el plan de cada fase. Al t
 4. Revisá el resumen: lo de severidad alta o crítica se verifica a mano antes de darlo por cierto.`),
   fase('explotacion', 'Explotación', 'Confirmar vulnerabilidades con el menor impacto posible',
     `Confirmá las vulnerabilidades candidatas con la prueba menos invasiva que alcance.
-1. listar_registros (tipo "hallazgos") por severidad.
+1. listar_registros (tipo "hallazgos") por severidad. buscar_papers con "exploitdb" si hace falta entender la técnica.
 2. Antes de algo que pueda afectar disponibilidad o datos, pedí confirmación explícita a la persona a cargo.
 3. Por cada una confirmada: crear_hallazgo con pasos reproducibles, y adjuntar_evidencia.
 4. Lo que no se confirma se descarta con una nota en el log.`),
@@ -49,7 +51,7 @@ Si el engagement es custom, modificar_fase_custom con el plan de cada fase. Al t
     `Dejá los hallazgos listos para el informe.
 1. listar_registros (tipo "hallazgos") y ver_hallazgo en cada uno.
 2. Completá descripción, pasos, recomendación, CVSS y CWE. Usá consultar_cve y buscar_plantillas; ordená por su prioridad.
-3. Revisá la cobertura con ver_metodologia.
+3. Revisá la cobertura con ver_metodologia y la remediación que trae ver_engagement. exportar_navigator da la capa de ATT&CK.
 4. Revisá la cadena con ver_cadena y completá los pasos que falten con relacionar_hallazgos.
 5. proponer_resumen con el estado general, los riesgos principales y qué corregir primero, en lenguaje para el cliente.
 6. Listá duplicados, hallazgos sin evidencia y propuestas pendientes. El PDF se genera desde el panel.`),

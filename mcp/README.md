@@ -108,8 +108,9 @@ Ningún nivel permite cambiar el alcance, aprobar propuestas, ni administrar usu
 | `ver_metodologia` `buscar_arsenal` | `marcar_metodologia` `registrar_tecnica` |
 | `ver_mapa` `ver_cadena` | `registrar_mapa` `proponer_retest` |
 | `buscar_plantillas` `consultar_cve` | `relacionar_hallazgos` `proponer_resumen` |
-| | `registrar_tiempo` `cambiar_fase` |
-| | `modificar_fase_custom` `publicar_actualizacion` |
+| `ver_vulnerabilidades` `exportar_navigator` | `registrar_tiempo` `cambiar_fase` |
+| `consultar_recon` `buscar_papers` | `modificar_fase_custom` `publicar_actualizacion` |
+| | `adjuntar_a_fase_custom` `escribir_nota` |
 | | `borrar` |
 
 Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_explotacion`, `reporte` y `retest`.
@@ -121,6 +122,10 @@ Prompts: `planificacion`, `reconocimiento`, `escaneo`, `explotacion`, `post_expl
 - **`cambiar_fase`** cambia la fase activa; en Propuesta queda a aprobar. **`registrar_tiempo`** necesita Escritura y queda a nombre de quien creó la key.
 - **`modificar_fase_custom`** reemplaza el plan o cambia el estado de una fase custom, con el mismo aviso que el resumen si la persona la cambió. **`publicar_actualizacion`** suma un avance, como un log. `ver_engagement` lista las fases custom con su id.
 - **`consultar_cve`** suma si se explota hoy (KEV), la probabilidad de que se explote (EPSS) y una prioridad. `null` es desconocido. `VULN_FUENTES_EXTERNAS=0` en el servidor apaga las consultas a CISA y FIRST.
+- **`ver_vulnerabilidades`** lee el seguimiento continuo del cliente del engagement, solo de activos en alcance; `ya_en_este_engagement` dice si ya se trajo como hallazgo. `ver_engagement` trae además la remediación: estados, retests, vencidos y cambios de severidad.
+- **`consultar_recon`** hace recon pasivo de una IP o un dominio en alcance (Shodan, RDAP, crt.sh y DNS), con las keys que configuró un admin. Consulta a esos servicios, no al objetivo; fuera de alcance no consulta nada, y las keys no salen en la respuesta.
+- **`buscar_papers`** busca papers públicos en Exploit-DB o lee los papers propios del dueño de la key. **`exportar_navigator`** devuelve la capa de MITRE ATT&CK Navigator con las técnicas registradas.
+- **`escribir_nota`** guarda una nota en la libreta del dueño de la key, vinculada al engagement, sin compartirla; `listar_registros` con `notas` lee solo esas, nunca las que otra persona compartió. **`adjuntar_a_fase_custom`** sube un documento a una fase custom, o una imagen a una de sus actualizaciones. `listar_registros` también lista el tiempo cargado y los documentos.
 
 `importar_escaneo` lee nmap (`-oX`), Nessus, OpenVAS, Burp, ZAP y Nuclei (JSONL). Es la forma más económica en tokens: guarda el original como evidencia y devuelve un resumen. El informe PDF se genera desde el panel.
 

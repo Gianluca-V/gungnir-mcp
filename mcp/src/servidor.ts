@@ -52,6 +52,7 @@ const camposHallazgo = {
 const LEE: ToolAnnotations = { readOnlyHint: true, openWorldHint: false }
 const ESCRIBE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false }
 const PISA: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
+const CONSULTA_AFUERA: ToolAnnotations = { readOnlyHint: true, openWorldHint: true }
 
 /**
  * Presenta una respuesta. Si trae contenido guardado, va entre etiquetas con un identificador al
@@ -125,19 +126,22 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     { engagement, objetivos: z.array(z.string().min(1).max(500)).min(1).max(100) }, LEE,
     async (a) => cliente.pedir('POST', `${await base(a.engagement)}/alcance/verificar`, { cuerpo: { objetivos: a.objetivos } }))
 
-  herramienta('listar_registros', 'Listar registros', 'Lista hallazgos, propuestas propias, logs, evidencias (sin su contenido) o técnicas.',
+  herramienta('listar_registros', 'Listar registros', 'Lista hallazgos, propuestas propias, logs, evidencias o documentos de fases custom (sin su contenido), técnicas, tiempo cargado o tus notas del engagement.',
     {
-      engagement, tipo: z.enum(['hallazgos', 'propuestas', 'logs', 'evidencias', 'tecnicas']),
+      engagement, tipo: z.enum(['hallazgos', 'propuestas', 'logs', 'evidencias', 'tecnicas', 'tiempo', 'notas', 'documentos']),
+      id: z.string().uuid().optional().describe('Notas: una sola, entera'),
       fase: fase.optional().describe('Hallazgos y logs'), severidad: severidad.optional().describe('Hallazgos'),
       retest: z.enum(['not_retested', 'passed', 'failed', 'partial']).optional().describe('Hallazgos'),
       estado: z.string().optional().describe('Hallazgos: open, in_remediation, fixed, accepted. Propuestas: pendiente, aprobada, rechazada'),
       ...pagina,
     }, LEE,
-    async ({ engagement: e, tipo, ...f }) => {
-      const admite: Record<string, string[]> = { hallazgos: ['fase', 'severidad', 'estado', 'retest'], propuestas: ['estado'], logs: ['fase'], evidencias: [], tecnicas: [] }
+    async ({ engagement: e, tipo, id, ...f }) => {
+      const admite: Record<string, string[]> = { hallazgos: ['fase', 'severidad', 'estado', 'retest'], propuestas: ['estado'], logs: ['fase'], evidencias: [], tecnicas: [], tiempo: [], notas: [], documentos: [] }
       for (const k of ['fase', 'severidad', 'estado', 'retest'] as const)
         if (f[k] !== undefined && !admite[tipo]!.includes(k)) throw new ErrorGungnir(`El filtro "${k}" no aplica a ${tipo}.`)
-      return cliente.pedir('GET', `${await base(e)}/${tipo}`, { consulta: f })
+      if (id === undefined) return cliente.pedir('GET', `${await base(e)}/${tipo}`, { consulta: f })
+      if (tipo !== 'notas' || Object.values(f).some((v) => v !== undefined)) throw new ErrorGungnir('"id" trae una sola nota: va con tipo "notas" y sin otros filtros.')
+      return cliente.pedir('GET', `${await base(e)}/notas/${id}`, { consulta: { completo: 1 } })
     })
 
   herramienta('ver_hallazgo', 'Ver hallazgo', 'Un hallazgo completo. Los textos largos salen recortados salvo con "completo".',
@@ -165,6 +169,32 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
 
   herramienta('consultar_cve', 'Consultar CVE', 'Datos de un CVE: descripción, CVSS y CWE (NVD), si se explota hoy (KEV), probabilidad de que se explote (EPSS) y prioridad. null es desconocido.', { cve: z.string().regex(/^CVE-\d{4}-\d{4,7}$/i) }, { readOnlyHint: true, openWorldHint: true },
     async (a) => cliente.pedir('GET', `/cve/${a.cve.toUpperCase()}`))
+
+  herramienta('ver_vulnerabilidades', 'Ver vulnerabilidades', 'Vulnerabilidades del seguimiento continuo del cliente, solo de activos en alcance. Miralas antes de crear un hallazgo: "ya_en_este_engagement" dice si ya se trajo.',
+    {
+      engagement, severidad: severidad.optional(), estado: z.enum(['abierto', 'en_remediacion', 'remediado', 'reabierto', 'riesgo_aceptado', 'falso_positivo']).optional(),
+      q: z.string().max(200).optional().describe('Título, CVE, nombre, IP o host del activo'), ...pagina,
+    }, LEE,
+    async ({ engagement: e, ...consulta }) => cliente.pedir('GET', `${await base(e)}/vulnerabilidades`, { consulta }))
+
+  herramienta('exportar_navigator', 'Exportar a Navigator', 'Capa de MITRE ATT&CK Navigator con las técnicas registradas que tienen id.', { engagement }, LEE,
+    async (a) => cliente.pedir('GET', `${await base(a.engagement)}/navigator`))
+
+  herramienta('consultar_recon', 'Consultar recon', 'Recon pasivo de un objetivo en alcance: Shodan, RDAP, crt.sh y DNS. Consulta a esos servicios, no al objetivo. Fuera de alcance no consulta nada.',
+    { engagement, objetivo: z.string().min(1).max(255).describe('Una IP o un dominio') }, CONSULTA_AFUERA,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/recon`, { cuerpo }))
+
+  herramienta('buscar_papers', 'Buscar papers', 'Papers públicos de Exploit-DB o los propios del dueño de la key. Con "id" devuelve uno propio completo.',
+    { fuente: z.enum(['exploitdb', 'propios']), q: z.string().max(200).optional().describe('Obligatorio en exploitdb, de 2 a 120 caracteres'), id: z.string().uuid().optional().describe('Solo propios'), ...pagina }, CONSULTA_AFUERA,
+    async ({ fuente, id, ...consulta }) => {
+      if (fuente === 'exploitdb') {
+        if (id) throw new ErrorGungnir('"id" es solo para papers propios.')
+        return cliente.pedir('GET', '/exploitdb', { consulta })
+      }
+      if (!id) return cliente.pedir('GET', '/papers', { consulta })
+      if (Object.values(consulta).some((v) => v !== undefined)) throw new ErrorGungnir('"id" devuelve un solo paper: no se combina con una búsqueda.')
+      return cliente.pedir('GET', `/papers/${id}`, { consulta: { completo: 1 } })
+    })
 
   // ── Escritura ───────────────────────────────────────────────────────────────
   herramienta('registrar_log', 'Registrar log', 'Registra una acción o una nota en una fase. Un objetivo fuera de alcance queda marcado como violación.',
@@ -248,6 +278,24 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
   herramienta('publicar_actualizacion', 'Publicar actualización', 'Publica un avance en una fase custom, como un log.',
     { engagement, fase_custom: faseCustom, contenido: z.string().min(1).max(15000) }, ESCRIBE,
     async ({ engagement: e, fase_custom: f, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/fases-custom/${f}/actualizaciones`, { cuerpo }))
+
+  herramienta('adjuntar_a_fase_custom', 'Adjuntar a fase custom', 'Sube un archivo de la carpeta de trabajo como documento de una fase custom, o como imagen de una de sus actualizaciones.',
+    {
+      engagement, fase_custom: faseCustom, ruta: z.string().min(1).describe('Relativa a la carpeta de trabajo'),
+      actualizacion: z.string().uuid().optional().describe('Id de la actualización: el archivo va como imagen'), descripcion: z.string().max(500).optional().describe('Solo documentos'),
+    }, ESCRIBE,
+    async ({ engagement: e, fase_custom: f, ruta, actualizacion, descripcion }) => {
+      if (actualizacion && descripcion !== undefined) throw new ErrorGungnir('Una imagen de actualización no lleva "descripcion".')
+      const archivo = await leerArchivo(carpeta, ruta)
+      const destino = `${await base(e)}/fases-custom/${f}`
+      return actualizacion
+        ? cliente.pedir('POST', `${destino}/actualizaciones/${actualizacion}/imagenes`, { archivo, cuerpo: {} })
+        : cliente.pedir('POST', `${destino}/documentos`, { archivo, cuerpo: descripcion === undefined ? {} : { descripcion } })
+    })
+
+  herramienta('escribir_nota', 'Escribir nota', 'Guarda una nota en tu libreta, vinculada al engagement. No se comparte con nadie.',
+    { engagement, titulo: z.string().min(1).max(255), contenido: z.string().max(100000).optional().describe('Markdown'), etiquetas: z.array(z.string().min(1).max(50)).max(20).optional() }, ESCRIBE,
+    async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/notas`, { cuerpo }))
 
   herramienta('proponer_resumen', 'Proponer resumen', 'Propone el resumen del engagement que lee el cliente en el informe. Siempre lo aprueba una persona.',
     { engagement, resumen: z.string().min(1).max(15000).describe('Markdown. Estado general, riesgos principales y recomendaciones') }, ESCRIBE,

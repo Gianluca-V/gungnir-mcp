@@ -6,7 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 ## [Sin publicar] - fork con agentes por MCP
 
 ### Agregado
-- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 28 herramientas y prompts por fase.
+- Servidor MCP por stdio en `mcp/` para Claude Code y opencode, con 34 herramientas y prompts por fase.
 - API para agentes en `/api/agente/v1`, con keys propias, límite de pedidos por key, reintentos seguros y auditoría. Las API keys anteriores no cambian.
 - Niveles de autonomía por key y por engagement. Los engagements existentes quedan sin acceso.
 - Propuestas de hallazgos que aprueba una persona, y registro de acciones fuera de alcance.
@@ -23,8 +23,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/); versioning foll
 - Cadena de ataque: relaciones entre hallazgos (habilita, escala, pivota) sin ciclos, con un grafo en el workspace y una sección en el PDF. Los agentes la leen y la proponen o la cargan.
 - Resumen del engagement para el informe: se edita en Reportes, sale en el PDF y un agente lo propone.
 - Los agentes cargan tiempo, cambian la fase activa y escriben el plan, el estado y los avances de las fases custom.
+- Los agentes leen las vulnerabilidades del seguimiento continuo de activos en alcance, la remediación, el tiempo cargado, la capa de ATT&CK Navigator y los documentos de las fases custom; hacen recon pasivo de objetivos en alcance; buscan papers en Exploit-DB y leen los propios; y escriben notas propias y adjuntan documentos e imágenes a las fases custom.
 
 ### Corregido
+- La exportación a ATT&CK Navigator respondía 500: buscaba una columna `name` que los engagements no tienen. Si una técnica está repetida, vale la primera que se registró.
+- El recon del panel ya no puede devolver una API key dentro del mensaje de error de un servicio.
 - Docker: el volumen de evidencias se monta donde el backend las guarda. Quien ya tenga una instalación tiene que copiar `/uploads` antes de recrear el contenedor.
 
 ### Cambiado
