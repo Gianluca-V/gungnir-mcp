@@ -203,7 +203,15 @@ async function dnsLookup(domain) {
 // ─────────────────────────────────────────────────────────────────────────────
 const IP_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
-async function queryTarget(target, apiKeys = {}) {
+/**
+ * IPs del dominio que se le consultan a Shodan, en orden: la que resolvió Shodan y, si no, el primer registro A.
+ * `permitirIp` deja afuera las que no se pueden consultar (para un agente, las que están fuera de alcance).
+ */
+function ipsAConsultar(resuelta, registrosA = [], permitirIp = () => true) {
+  return [...new Set([resuelta, registrosA[0]].filter(Boolean))].filter((ip) => permitirIp(ip));
+}
+
+async function queryTarget(target, apiKeys = {}, { permitirIp = () => true } = {}) {
   const isIP   = IP_RE.test(target.trim());
   const domain = target.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
 
@@ -230,17 +238,13 @@ async function queryTarget(target, apiKeys = {}) {
 
     const resolved = resolveResult.status === "fulfilled" ? resolveResult.value : null;
     // If Shodan resolved an IP, also fetch host info
+    // Host info de la primera IP que Shodan conozca: la resuelta por Shodan o el primer registro A.
     let hostResults = [];
-    if (resolved?.ok && resolved.data?.[domain]) {
-      const ip = resolved.data[domain];
+    const resuelta = resolved?.ok ? resolved.data?.[domain] : null;
+    const registrosA = dnsResult.status === "fulfilled" ? dnsResult.value?.a || [] : [];
+    for (const ip of apiKeys.shodan ? ipsAConsultar(resuelta, registrosA, permitirIp) : []) {
       const hostR = await shodanHost(ip, apiKeys.shodan).catch(e => ({ ok: false, error: e.message }));
-      if (hostR.ok) hostResults.push(hostR);
-    }
-    // Also try from DNS A records if we got them and Shodan isn't configured
-    if (hostResults.length === 0 && dnsResult.status === "fulfilled" && dnsResult.value?.a?.length > 0 && apiKeys.shodan) {
-      const firstIP = dnsResult.value.a[0];
-      const hostR = await shodanHost(firstIP, apiKeys.shodan).catch(e => ({ ok: false, error: e.message }));
-      if (hostR.ok) hostResults.push(hostR);
+      if (hostR.ok) { hostResults.push(hostR); break; }
     }
 
     return {
@@ -262,4 +266,4 @@ function ocultarClaves(resultado, apiKeys = {}) {
   return JSON.parse(claves.reduce((s, k) => s.split(k).join("[OCULTO]"), JSON.stringify(resultado)));
 }
 
-module.exports = { ocultarClaves, queryTarget, shodanHost, shodanDnsResolve, shodanDnsReverse, shodanAccountInfo, rdapDomain, crtshSubdomains, dnsLookup };
+module.exports = { ocultarClaves, ipsAConsultar, queryTarget, shodanHost, shodanDnsResolve, shodanDnsReverse, shodanAccountInfo, rdapDomain, crtshSubdomains, dnsLookup };

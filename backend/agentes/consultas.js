@@ -9,6 +9,7 @@
  */
 const resumenes = require("../resumenes");
 const { evaluador } = require("./alcance");
+const { ubicar } = require("./mapa");
 const { ErrorHttp, ruta, texto, opcion } = require("./comun");
 
 const SEVERIDADES = ["critical", "high", "medium", "low", "info"];
@@ -46,9 +47,15 @@ function montar(router, { acceso, auditLog, qRow, qRows, consultarRecon, buscarE
     const filas = await qRows(`${sql} ORDER BY FIELD(v.severidad,'critical','high','medium','low','info'), v.primera_vez, v.id LIMIT ${TOPE_VULNS}`, params);
     const evaluar = await alcanceDe(req.engagement.id);
     const visibles = filas.filter((v) => enAlcance(evaluar, v.activo_ip, v.activo_hostname))
-      .map((v) => ({ ...v, kev: Boolean(v.kev), ya_en_este_engagement: v.engagement_id === req.engagement.id, engagement_id: undefined }));
+      .map((v) => {
+        // El hallazgo de otro engagement no es de esta key: solo se dice que ya se trajo a otro lado.
+        const aca = v.engagement_id === req.engagement.id;
+        return { ...v, kev: Boolean(v.kev), ya_en_este_engagement: aca, ya_en_otro_engagement: Boolean(v.engagement_id) && !aca,
+          finding_id: aca ? v.finding_id : undefined, engagement_id: undefined };
+      });
     const hayMas = desde + limite < visibles.length;
-    entregar(req, res, visibles.slice(desde, desde + limite), { max: LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null });
+    entregar(req, res, visibles.slice(desde, desde + limite), { max: LARGO_LISTA, desde, hay_mas: hayMas, siguiente: hayMas ? desde + limite : null,
+      ...(filas.length === TOPE_VULNS ? { aviso: `El cliente tiene más de ${TOPE_VULNS} vulnerabilidades con esos filtros: se revisaron las ${TOPE_VULNS} más graves. Filtrá por severidad, estado o texto.` } : {}) });
   }));
 
   // ── Tiempo y Navigator ──────────────────────────────────────────────────────
@@ -100,10 +107,13 @@ function montar(router, { acceso, auditLog, qRow, qRows, consultarRecon, buscarE
   // Consulta servicios de terceros (Shodan, RDAP, crt.sh, DNS), no al objetivo. Igual exige alcance:
   // fuera de él no se consulta a nadie.
   router.post("/engagements/:id/recon", con("lectura"), ruta(async (req, res) => {
-    const objetivo = texto(req.body?.objetivo, "objetivo", { max: 255, obligatorio: true });
-    const a = (await alcanceDe(req.engagement.id))(objetivo);
+    // Se consulta lo mismo que se juzgó: una URL o un "usuario@host" se leen distinto según quién los lea.
+    const lugar = ubicar(texto(req.body?.objetivo, "objetivo", { max: 255, obligatorio: true }));
+    if (!lugar || lugar.columna === "url_address") throw new ErrorHttp(400, `"objetivo" tiene que ser una sola IP o un dominio, sin URL, puerto ni usuario.`);
+    const objetivo = lugar.valor, evaluar = await alcanceDe(req.engagement.id), a = evaluar(objetivo);
     if (!a.dentro) throw new ErrorHttp(422, `No se consultó: el objetivo está fuera de alcance. ${req.ocultar.texto(a.motivo, true)}`);
-    const datos = await consultarRecon(objetivo);
+    // La IP que resuelva el dominio tampoco se consulta si está fuera de alcance.
+    const datos = await consultarRecon(objetivo, { permitirIp: (ip) => evaluar(ip).dentro });
     await auditLog(req.agente.userId, req.agente.username, "agente_recon", "engagements", req.engagement.id, `[key ${req.agente.keyNombre}] ${objetivo}`.slice(0, 2000), req.ip);
     res.json({ contenido_no_confiable: true, datos: req.ocultar.objeto(datos) });
   }));

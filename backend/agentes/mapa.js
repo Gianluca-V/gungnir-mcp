@@ -214,4 +214,4 @@ async function origenesDe(q, engagementId, { equipos }) {
   return Object.fromEntries(equipos.filter((e) => e.desde).map(({ desde }) => [desde, { en_mapa: enMapa.has(claveDe(desde)), en_pedido: enPedido.get(claveDe(desde)) ?? null }]));
 }
 
-module.exports = { SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, origenesDe, mismoPedido, canonico };
+module.exports = { ubicar, SISTEMAS, MAX_PENDIENTES, validar, objetivosDe, aplicar, nombresDe, origenesDe, mismoPedido, canonico };

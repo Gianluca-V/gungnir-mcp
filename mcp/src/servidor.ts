@@ -170,7 +170,7 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
   herramienta('consultar_cve', 'Consultar CVE', 'Datos de un CVE: descripción, CVSS y CWE (NVD), si se explota hoy (KEV), probabilidad de que se explote (EPSS) y prioridad. null es desconocido.', { cve: z.string().regex(/^CVE-\d{4}-\d{4,7}$/i) }, { readOnlyHint: true, openWorldHint: true },
     async (a) => cliente.pedir('GET', `/cve/${a.cve.toUpperCase()}`))
 
-  herramienta('ver_vulnerabilidades', 'Ver vulnerabilidades', 'Vulnerabilidades del seguimiento continuo del cliente, solo de activos en alcance. Miralas antes de crear un hallazgo: "ya_en_este_engagement" dice si ya se trajo.',
+  herramienta('ver_vulnerabilidades', 'Ver vulnerabilidades', 'Vulnerabilidades del seguimiento continuo del cliente, solo de activos en alcance. Miralas antes de crear un hallazgo: "ya_en_este_engagement" y "ya_en_otro_engagement" dicen si ya se trajo.',
     {
       engagement, severidad: severidad.optional(), estado: z.enum(['abierto', 'en_remediacion', 'remediado', 'reabierto', 'riesgo_aceptado', 'falso_positivo']).optional(),
       q: z.string().max(200).optional().describe('Título, CVE, nombre, IP o host del activo'), ...pagina,
@@ -181,7 +181,7 @@ export function crearServidor({ cliente, carpeta, engagement: porDefecto = null,
     async (a) => cliente.pedir('GET', `${await base(a.engagement)}/navigator`))
 
   herramienta('consultar_recon', 'Consultar recon', 'Recon pasivo de un objetivo en alcance: Shodan, RDAP, crt.sh y DNS. Consulta a esos servicios, no al objetivo. Fuera de alcance no consulta nada.',
-    { engagement, objetivo: z.string().min(1).max(255).describe('Una IP o un dominio') }, CONSULTA_AFUERA,
+    { engagement, objetivo: z.string().min(1).max(255).describe('Una sola IP o un dominio, sin URL, puerto ni usuario') }, CONSULTA_AFUERA,
     async ({ engagement: e, ...cuerpo }) => cliente.pedir('POST', `${await base(e)}/recon`, { cuerpo }))
 
   herramienta('buscar_papers', 'Buscar papers', 'Papers públicos de Exploit-DB o los propios del dueño de la key. Con "id" devuelve uno propio completo.',

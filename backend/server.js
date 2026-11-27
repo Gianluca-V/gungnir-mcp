@@ -3578,13 +3578,13 @@ app.get("/api/integrations/recon-keys/status", auth(), async (req, res) => {
 // INTEGRATIONS - RECON QUERY (Shodan + free APIs)
 // ─────────────────────────────────────────────────────────────────────────────
 /** Consulta pasiva de un objetivo. Un error de un servicio puede citar la URL: ninguna key sale en la respuesta. */
-async function consultarRecon(target) {
+async function consultarRecon(target, opciones = {}) {
   const apiKeys = {};
   for (const svc of RECON_KEY_SERVICES) {
     const row = await qRow("SELECT `value` FROM settings WHERE `key`=?", [`recon_key_${svc}`]);
     if (row?.value) apiKeys[svc] = row.value;
   }
-  return reconInt.ocultarClaves(await reconInt.queryTarget(target, apiKeys), apiKeys);
+  return reconInt.ocultarClaves(await reconInt.queryTarget(target, apiKeys, opciones), apiKeys);
 }
 app.post("/api/integrations/recon/query", auth(), async (req, res) => {
   const { target } = req.body;

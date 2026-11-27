@@ -17,7 +17,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const jwt = require("jsonwebtoken");
-const { ocultarClaves } = require("../integrations/recon");
+const { ocultarClaves, ipsAConsultar } = require("../integrations/recon");
 const URL_DB = process.env.GUNGNIR_PRUEBA_DB;
 
 const BACKEND = path.join(__dirname, "..");
@@ -30,6 +30,14 @@ test("las keys del recon no salen en el resultado, ni dentro de un error que cit
   assert.equal(r.shodan.error, "GET https://api.shodan.io/x?key=[OCULTO] falló");
   assert.deepEqual(r.dns, { a: ["10.0.0.1"] });
   assert.deepEqual(ocultarClaves({ x: 1 }, {}), { x: 1 });
+});
+
+test("a Shodan solo se le pregunta por las IPs del dominio que se permiten, sin repetir", () => {
+  const dentro = (ip) => ip.startsWith("10.");
+  assert.deepEqual(ipsAConsultar("10.0.0.1", ["10.0.0.1", "10.0.0.2"]), ["10.0.0.1"]);
+  assert.deepEqual(ipsAConsultar("172.16.0.1", ["10.0.0.2"], dentro), ["10.0.0.2"]);
+  assert.deepEqual(ipsAConsultar("172.16.0.1", ["172.16.0.2"], dentro), []);
+  assert.deepEqual(ipsAConsultar(null, [], dentro), []);
 });
 
 describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "sin GUNGNIR_PRUEBA_DB" }, () => {
@@ -127,8 +135,8 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       };
       const vuln = async (cliente, act, titulo, extra = {}) => {
         const id = uid();
-        await sql("INSERT INTO vuln_hallazgos (id,cliente_id,activo_id,fuente,titulo,severidad,clave_dedup,estado,engagement_id) VALUES (?,?,?,?,?,?,?,?,?)",
-          [id, cliente, act, "nessus", titulo, extra.severidad || "high", crypto.randomBytes(32).toString("hex"), "abierto", extra.engagement_id || null]);
+        await sql("INSERT INTO vuln_hallazgos (id,cliente_id,activo_id,fuente,titulo,severidad,clave_dedup,estado,engagement_id,finding_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          [id, cliente, act, "nessus", titulo, extra.severidad || "high", crypto.randomBytes(32).toString("hex"), "abierto", extra.engagement_id || null, extra.finding_id || null]);
         return id;
       };
       const dentro = await activo(CLIENTE, "10.10.1.5", null);
@@ -136,7 +144,11 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       const excluido = await activo(CLIENTE, "10.10.1.6", "admin.ejemplo.test");
       const fuera = await activo(CLIENTE, "172.16.0.1", null);
       const ajeno = await activo(OTRO_CLIENTE, "10.10.1.5", null);
-      const v1 = await vuln(CLIENTE, dentro, "OpenSSH viejo", { engagement_id: E.a });
+      const fa = uid(), fc = uid();
+      await sql("INSERT INTO findings (id,engagement_id,title,severity,affected_asset,status) VALUES (?,?,?,?,?,?),(?,?,?,?,?,?)",
+        [fa, E.a, "OpenSSH viejo", "high", "10.10.1.5", "open", fc, E.custom, "Llevada a otro", "low", "10.10.1.5", "open"]);
+      const v1 = await vuln(CLIENTE, dentro, "OpenSSH viejo", { engagement_id: E.a, finding_id: fa });
+      const v3 = await vuln(CLIENTE, dentro, "Llevada a otro", { engagement_id: E.custom, finding_id: fc, severidad: "low" });
       const v2 = await vuln(CLIENTE, porNombre, "TLS 1.0", { severidad: "medium" });
       await vuln(CLIENTE, excluido, "Panel expuesto");
       await vuln(CLIENTE, fuera, "SMB firmado opcional");
@@ -145,9 +157,12 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       const r = await ag("lectura", "GET", `/engagements/${E.a}/vulnerabilidades`);
       assert.equal(r.status, 200, r.texto);
       assert.equal(r.json.contenido_no_confiable, true);
-      assert.deepEqual(r.json.datos.map((v) => v.id).sort(), [v1, v2].sort());
-      assert.equal(r.json.datos.find((v) => v.id === v1).ya_en_este_engagement, true);
-      assert.equal(r.json.datos.find((v) => v.id === v2).ya_en_este_engagement, false);
+      assert.deepEqual(r.json.datos.map((v) => v.id).sort(), [v1, v2, v3].sort());
+      const de = (id) => r.json.datos.find((v) => v.id === id);
+      assert.deepEqual([de(v1).ya_en_este_engagement, de(v1).ya_en_otro_engagement, de(v1).finding_id], [true, false, fa]);
+      assert.deepEqual([de(v2).ya_en_este_engagement, de(v2).ya_en_otro_engagement], [false, false]);
+      // El hallazgo de otro engagement no se nombra: solo se dice que ya se trajo.
+      assert.deepEqual([de(v3).ya_en_este_engagement, de(v3).ya_en_otro_engagement, de(v3).finding_id], [false, true, undefined]);
 
       const filtrado = await ag("lectura", "GET", `/engagements/${E.a}/vulnerabilidades?severidad=medium`);
       assert.deepEqual(filtrado.json.datos.map((v) => v.id), [v2]);
@@ -189,9 +204,11 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       const r = await ag("lectura", "GET", `/engagements/${E.a}`);
       assert.equal(r.status, 200, r.texto);
       const rem = r.json.datos.remediacion;
-      assert.equal(rem.total, 2);
+      // Las pruebas de vulnerabilidades también dejan un hallazgo sin retest en este engagement.
+      const sinRetest = (await fila("SELECT COUNT(*) AS n FROM findings WHERE engagement_id=? AND retest_status='not_retested'", [E.a])).n;
+      assert.equal(rem.total, sinRetest + 1);
       assert.equal(rem.vencidos, 1);
-      assert.deepEqual(rem.por_retest, { not_retested: 1, passed: 0, failed: 0, partial: 1 });
+      assert.deepEqual(rem.por_retest, { not_retested: sinRetest, passed: 0, failed: 0, partial: 1 });
       assert.deepEqual(rem.diffs.map((d) => [d.title, d.de, d.a]), [["Bajó", "critical", "medium"]]);
       const panel = await persona("GET", `/engagements/${E.a}/remediation-summary`);
       assert.deepEqual({ ...panel.json, diffs: panel.json.diffs.map((d) => d.id).sort() }, { ...rem, diffs: rem.diffs.map((d) => d.id).sort() });
@@ -247,13 +264,28 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       assert.equal(descarga.texto, "# Notas de la revisión");
       const lista = await ag("lectura", "GET", `/engagements/${E.custom}/documentos`);
       assert.deepEqual(lista.json.datos.map((x) => [x.tipo, x.original_name, x.fase_custom]), [["documento", "hallazgos.md", FASE]]);
-      assert.equal((await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${FASE}/documentos`, archivo("x.html", "<script>"))).status, 400);
+      for (const nombre of ["x.html", "x.svg", "a.png.html"])
+        assert.equal((await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${FASE}/documentos`, archivo(nombre, "<script>"))).status, 400, nombre);
+      // El nombre que manda el agente queda solo como nombre original: el archivo va con uno al azar dentro de uploads.
+      const raro = await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${FASE}/documentos`, archivo("../../fuera.md", "x"));
+      assert.equal(raro.status, 201, raro.texto);
+      const dr = await fila("SELECT original_name, filename FROM custom_phase_docs WHERE id=?", [raro.json.documento_id]);
+      subidos.push(dr.filename);
+      assert.equal(dr.original_name, "fuera.md");
+      assert.match(dr.filename, /^[0-9a-f]{32}$/);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.a}/fases-custom/${FASE}/documentos`, archivo("a.md", "x"))).status, 404);
     });
 
     test("🔴 una imagen va a una actualización de la fase; otro tipo de archivo se rechaza", async () => {
       const ruta = `/engagements/${E.custom}/fases-custom/${FASE}/actualizaciones/${ACT}/imagenes`;
       assert.equal((await ag("propuesta", "POST", ruta, archivo("notas.txt", "texto"))).status, 400);
       assert.equal((await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${FASE}/actualizaciones/${uid()}/imagenes`, archivo("a.png", "png"))).status, 404);
+      // Una actualización de otra fase del mismo engagement tampoco sirve.
+      const otraFase = uid(), otraAct = uid();
+      await sql("INSERT INTO custom_phases (id,engagement_id,name) VALUES (?,?,?)", [otraFase, E.custom, "Otra fase"]);
+      await sql("INSERT INTO custom_phase_updates (id,phase_id,content,created_by) VALUES (?,?,?,?)", [otraAct, otraFase, "Otro avance", U.admin.id]);
+      assert.equal((await ag("propuesta", "POST", `/engagements/${E.custom}/fases-custom/${FASE}/actualizaciones/${otraAct}/imagenes`, archivo("a.png", "png"))).status, 404);
+      assert.equal((await ag("lectura", "POST", ruta, archivo("a.png", "png"))).status, 403);
       const r = await ag("propuesta", "POST", ruta, archivo("captura.png", "\x89PNG"));
       assert.equal(r.status, 201, r.texto);
       const i = await fila("SELECT * FROM custom_phase_update_images WHERE id=?", [r.json.imagen_id]);
@@ -272,6 +304,15 @@ describe("conexiones del agente con el resto de Gungnir", { skip: !URL_DB && "si
       assert.match(r.json.error, /No se consultó/);
       assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/recon`, { objetivo: "admin.ejemplo.test" })).status, 422);
       assert.equal((await ag("lectura", "POST", `/engagements/${E.a}/recon`, {})).status, 400);
+    });
+
+    test("🔴 el recon solo acepta una IP o un dominio: una URL, un puerto o un usuario no se consultan", async () => {
+      for (const objetivo of ["https://app.ejemplo.test/", "app.ejemplo.test:443", "10.10.1.5:22", "*.ejemplo.test"]) {
+        const r = await ag("lectura", "POST", `/engagements/${E.a}/recon`, { objetivo });
+        assert.equal(r.status, 400, `${objetivo}: ${r.texto}`);
+        assert.match(r.json.error, /una sola IP o un dominio/);
+      }
+      assert.equal((await fila("SELECT COUNT(*) AS n FROM audit_logs WHERE action='agente_recon' AND entity_id=?", [E.a])).n, 0);
     });
 
     test("🔴 Exploit-DB pide al menos 2 caracteres antes de salir", async () => {
